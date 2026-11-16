@@ -1,0 +1,629 @@
+import {
+  GarmentCategory,
+  Measurements,
+  PathCommand,
+  PatternNotch,
+  PatternPiece,
+  QuickLengthPreset,
+  SeamAllowance,
+  SleeveStyle,
+} from "../types";
+import { normalizePiece } from "./geometry";
+
+export const QUICK_LENGTH_LABELS: Record<QuickLengthPreset, string> = {
+  photo: "Según medida / foto",
+  mini: "Corto (Mini)",
+  knee: "A la rodilla",
+  midi: "Midi (Media pierna)",
+  maxi: "Largo (Tobillo)",
+};
+
+export const QUICK_LENGTH_SKIRT_CM: Record<
+  Exclude<QuickLengthPreset, "photo">,
+  number
+> = {
+  mini: 42,
+  knee: 58,
+  midi: 76,
+  maxi: 98,
+};
+
+export const QUICK_LENGTH_INSEAM_CM: Record<
+  Exclude<QuickLengthPreset, "photo">,
+  number
+> = {
+  mini: 16,
+  knee: 44,
+  midi: 60,
+  maxi: 76,
+};
+
+/**
+ * Resolves effective measurements and whether photo hem truncation should be
+ * overridden when a quick garment length preset is active.
+ */
+export function resolveQuickLength(
+  measurements: Measurements,
+  preset: QuickLengthPreset,
+  category: GarmentCategory
+): {
+  measurements: Measurements;
+  overrideBottomLength: boolean;
+  topScaleForLength: number;
+} {
+  if (preset === "photo") {
+    return {
+      measurements,
+      overrideBottomLength: false,
+      topScaleForLength: 1,
+    };
+  }
+
+  const nextSkirt = QUICK_LENGTH_SKIRT_CM[preset];
+  const nextInseam = QUICK_LENGTH_INSEAM_CM[preset];
+
+  const topScaleMap: Record<Exclude<QuickLengthPreset, "photo">, number> = {
+    mini: 0.78,
+    knee: 1.0,
+    midi: 1.12,
+    maxi: 1.24,
+  };
+
+  return {
+    measurements: {
+      ...measurements,
+      skirtLength: nextSkirt,
+      inseam: nextInseam,
+    },
+    overrideBottomLength: category !== "top",
+    topScaleForLength: category === "top" ? topScaleMap[preset] : 1,
+  };
+}
+
+/**
+ * Shared sleeve builder supporting standard sleeves and bell/flared sleeves.
+ */
+export function buildSleevePiece(params: {
+  armholeDepth: number;
+  totalArmholePerimeter: number;
+  sleeveLengthCm: number;
+  sleeveStyle: SleeveStyle;
+  flaredSleeve?: boolean;
+  seamAllowance: SeamAllowance;
+}): PatternPiece | null {
+  const {
+    armholeDepth,
+    totalArmholePerimeter,
+    sleeveLengthCm,
+    sleeveStyle,
+    flaredSleeve = false,
+    seamAllowance,
+  } = params;
+
+  if (sleeveStyle === "sleeveless" && !flaredSleeve) {
+    return null;
+  }
+
+  const effectiveStyle: Exclude<SleeveStyle, "sleeveless"> =
+    sleeveStyle === "sleeveless" ? "short" : sleeveStyle;
+
+  const capHeight = Math.max(12, armholeDepth * 0.65);
+  const sleeveWidth = Math.max(
+    28,
+    Math.sqrt(
+      Math.max(
+        100,
+        totalArmholePerimeter * totalArmholePerimeter -
+          capHeight * capHeight * 2.2
+      )
+    ) * 0.88
+  );
+  const halfSleeve = sleeveWidth / 2;
+  const sleeveLen =
+    effectiveStyle === "short"
+      ? Math.min(32, Math.max(20, sleeveLengthCm * 0.42))
+      : Math.max(46, sleeveLengthCm);
+
+  let sleeveSeam: PathCommand[];
+
+  if (flaredSleeve) {
+    const cuffHalf = Math.max(
+      halfSleeve + 5,
+      halfSleeve * (effectiveStyle === "long" ? 1.52 : 1.44)
+    );
+    const bodySpan = Math.max(8, sleeveLen - capHeight);
+
+    sleeveSeam = [
+      { type: "M", x: halfSleeve, y: 0 },
+      {
+        type: "C",
+        cp1x: halfSleeve + halfSleeve * 0.44,
+        cp1y: 0,
+        cp2x: sleeveWidth - halfSleeve * 0.34,
+        cp2y: capHeight,
+        x: sleeveWidth,
+        y: capHeight,
+      },
+      // Flared outward bell curve on right side
+      {
+        type: "C",
+        cp1x: sleeveWidth + 1.4,
+        cp1y: capHeight + bodySpan * 0.45,
+        cp2x: halfSleeve + cuffHalf - 1.2,
+        cp2y: sleeveLen - bodySpan * 0.18,
+        x: halfSleeve + cuffHalf,
+        y: sleeveLen,
+      },
+      // Gently curved bell cuff hem
+      {
+        type: "C",
+        cp1x: halfSleeve + cuffHalf * 0.42,
+        cp1y: sleeveLen + 2.2,
+        cp2x: halfSleeve - cuffHalf * 0.42,
+        cp2y: sleeveLen + 2.2,
+        x: halfSleeve - cuffHalf,
+        y: sleeveLen,
+      },
+      // Flared outward bell curve on left side
+      {
+        type: "C",
+        cp1x: halfSleeve - cuffHalf + 1.2,
+        cp1y: sleeveLen - bodySpan * 0.18,
+        cp2x: -1.4,
+        cp2y: capHeight + bodySpan * 0.45,
+        x: 0,
+        y: capHeight,
+      },
+      {
+        type: "C",
+        cp1x: halfSleeve * 0.34,
+        cp1y: capHeight,
+        cp2x: halfSleeve - halfSleeve * 0.44,
+        cp2y: 0,
+        x: halfSleeve,
+        y: 0,
+      },
+      { type: "Z" },
+    ];
+  } else {
+    const cuffHalf = Math.max(
+      9.5,
+      halfSleeve * (effectiveStyle === "long" ? 0.56 : 0.78)
+    );
+    sleeveSeam = [
+      { type: "M", x: halfSleeve, y: 0 },
+      {
+        type: "C",
+        cp1x: halfSleeve + halfSleeve * 0.44,
+        cp1y: 0,
+        cp2x: sleeveWidth - halfSleeve * 0.34,
+        cp2y: capHeight,
+        x: sleeveWidth,
+        y: capHeight,
+      },
+      { type: "L", x: halfSleeve + cuffHalf, y: sleeveLen },
+      { type: "L", x: halfSleeve - cuffHalf, y: sleeveLen },
+      { type: "L", x: 0, y: capHeight },
+      {
+        type: "C",
+        cp1x: halfSleeve * 0.34,
+        cp1y: capHeight,
+        cp2x: halfSleeve - halfSleeve * 0.44,
+        cp2y: 0,
+        x: halfSleeve,
+        y: 0,
+      },
+      { type: "Z" },
+    ];
+  }
+
+  return normalizePiece(
+    {
+      id: "sleeve",
+      name: flaredSleeve
+        ? `MANGA ${effectiveStyle === "long" ? "LARGA" : "CORTA"} ACAMPANADA (x2)`
+        : `MANGA ${effectiveStyle === "long" ? "LARGA" : "CORTA"} (x2)`,
+      subtitle: flaredSleeve
+        ? `Caída acampanada | Sisa: ${totalArmholePerimeter.toFixed(1)} cm`
+        : `Sisa: ${totalArmholePerimeter.toFixed(1)} cm`,
+      tabLabel: flaredSleeve ? "Manga Acampanada" : "Manga",
+      seamPath: sleeveSeam,
+      grainline: { x1: halfSleeve, y1: 4, x2: halfSleeve, y2: sleeveLen - 4 },
+      notches: [{ x: halfSleeve, y: 0, angle: -90, label: "Hombro" }],
+      labelPos: { x: halfSleeve, y: sleeveLen * 0.55 },
+    },
+    seamAllowance
+  );
+}
+
+/**
+ * Generates the matching wrap neckline facing ("Vista de Escote Cruzado")
+ * following the exact diagonal wrap curve of the asymmetric front piece.
+ */
+export function buildWrapFacingPiece(params: {
+  neckW: number;
+  shoulderX: number;
+  shoulderSlope: number;
+  wrapOverlap: number;
+  wrapWaistY: number;
+  seamAllowance: SeamAllowance;
+}): PatternPiece {
+  const {
+    neckW,
+    shoulderX,
+    shoulderSlope,
+    wrapOverlap,
+    wrapWaistY,
+    seamAllowance,
+  } = params;
+
+  const facingW = 5.2;
+  const shoulderLen = Math.max(0.1, shoulderX - neckW);
+  const shoulderTan = shoulderSlope / shoulderLen;
+  const shOutX = Math.min(shoulderX - 1.5, neckW + facingW);
+  const shOutY = (shOutX - neckW) * shoulderTan;
+
+  // Outer diagonal matches wrap front edge from (neckW, 0) -> (-wrapOverlap, wrapWaistY)
+  const facingSeam: PathCommand[] = [
+    { type: "M", x: neckW, y: 0 },
+    { type: "L", x: shOutX, y: shOutY },
+    // Inner facing curve offset by +facingW along the wrap diagonal
+    {
+      type: "C",
+      cp1x: neckW * 0.55 + facingW,
+      cp1y: wrapWaistY * 0.25 + 2.5,
+      cp2x: -wrapOverlap * 0.35 + facingW,
+      cp2y: wrapWaistY * 0.62 + 2.0,
+      x: -wrapOverlap + facingW,
+      y: wrapWaistY + 2.5,
+    },
+    { type: "L", x: -wrapOverlap, y: wrapWaistY + 2.5 },
+    { type: "L", x: -wrapOverlap, y: wrapWaistY },
+    // Exact wrap front edge curve back up to shoulder-neck
+    {
+      type: "C",
+      cp1x: -wrapOverlap * 0.35,
+      cp1y: wrapWaistY * 0.62,
+      cp2x: neckW * 0.55,
+      cp2y: wrapWaistY * 0.25,
+      x: neckW,
+      y: 0,
+    },
+    { type: "Z" },
+  ];
+
+  const midX = (neckW - wrapOverlap) / 2 + facingW * 0.5;
+  const midY = wrapWaistY * 0.52;
+
+  return normalizePiece(
+    {
+      id: "wrap_facing",
+      name: "VISTA DE ESCOTE CRUZADO (x2)",
+      subtitle: "Cortar 2 piezas (Izquierda y Derecha)",
+      tabLabel: "Vista Escote Cruzado",
+      seamPath: facingSeam,
+      grainline: {
+        x1: midX + 0.5,
+        y1: Math.max(6, midY - 8),
+        x2: midX + 0.5,
+        y2: Math.min(wrapWaistY, midY + 8),
+      },
+      notches: [
+        { x: neckW, y: 0, angle: -90, label: "Hombro" },
+        { x: -wrapOverlap, y: wrapWaistY, angle: 180, label: "Cruce cintura" },
+      ],
+      labelPos: { x: midX, y: midY },
+    },
+    seamAllowance
+  );
+}
+
+/**
+ * Generates "Tira de Amarre / Cinturón" scaled to waist circumference.
+ */
+export function buildWaistTiePiece(
+  effWaist: number,
+  seamAllowance: SeamAllowance
+): PatternPiece {
+  const tieLength = Math.min(92, Math.max(64, Math.round(effWaist * 0.78 + 24)));
+  const tieHeight = 7.0; // Finished folded width ~3.5 cm
+  const bevel = 4.0;
+
+  const tieSeam: PathCommand[] = [
+    { type: "M", x: 0, y: 0 },
+    { type: "L", x: tieLength, y: 0 },
+    { type: "L", x: tieLength - bevel, y: tieHeight },
+    { type: "L", x: 0, y: tieHeight },
+    { type: "Z" },
+  ];
+
+  return normalizePiece(
+    {
+      id: "waist_tie",
+      name: "TIRA DE AMARRE / CINTURÓN (x2)",
+      subtitle: `Cortar 2 tiras (${tieLength} × ${tieHeight} cm)`,
+      tabLabel: "Tira / Cinturón",
+      seamPath: tieSeam,
+      grainline: {
+        x1: 6,
+        y1: tieHeight / 2,
+        x2: tieLength - 8,
+        y2: tieHeight / 2,
+      },
+      notches: [{ x: 0, y: tieHeight / 2, angle: 180, label: "Unión costado" }],
+      labelPos: { x: tieLength * 0.48, y: tieHeight * 0.52 },
+    },
+    seamAllowance
+  );
+}
+
+/**
+ * Generates curved/flounced "Bolero Inferior" that adds to the skirt or dress length.
+ */
+export function buildHemRufflePiece(
+  hemHalfWidth: number,
+  lowerGarmentLenCm: number,
+  seamAllowance: SeamAllowance
+): { piece: PatternPiece; addedLengthCm: number } {
+  const ruffleHeight = Math.max(14, Math.min(24, Math.round(lowerGarmentLenCm * 0.24)));
+  const halfSpan = Math.min(43, Math.max(26, Math.round(hemHalfWidth * 1.08)));
+  const archDrop = 7.5;
+
+  const ruffleSeam: PathCommand[] = [
+    { type: "M", x: -halfSpan, y: archDrop },
+    {
+      type: "C",
+      cp1x: -halfSpan * 0.45,
+      cp1y: -archDrop * 0.3,
+      cp2x: halfSpan * 0.45,
+      cp2y: -archDrop * 0.3,
+      x: halfSpan,
+      y: archDrop,
+    },
+    { type: "L", x: halfSpan + 3.5, y: archDrop + ruffleHeight },
+    {
+      type: "C",
+      cp1x: halfSpan * 0.45,
+      cp1y: archDrop * 0.25 + ruffleHeight,
+      cp2x: -halfSpan * 0.45,
+      cp2y: archDrop * 0.25 + ruffleHeight,
+      x: -halfSpan - 3.5,
+      y: archDrop + ruffleHeight,
+    },
+    { type: "Z" },
+  ];
+
+  const piece = normalizePiece(
+    {
+      id: "hem_ruffle",
+      name: "BOLERO INFERIOR (x2)",
+      subtitle: `Cortar 2 piezas fruncidas (+${ruffleHeight} cm al largo)`,
+      tabLabel: "Bolero Inferior",
+      seamPath: ruffleSeam,
+      grainline: {
+        x1: 0,
+        y1: 2.5,
+        x2: 0,
+        y2: ruffleHeight + 1.5,
+      },
+      notches: [
+        { x: 0, y: 0.4, angle: -90, label: "Centro (fruncir)" },
+        { x: 0, y: ruffleHeight + 2.8, angle: 90, label: "Ruedo" },
+      ],
+      labelPos: { x: 0, y: archDrop + ruffleHeight * 0.42 },
+    },
+    seamAllowance
+  );
+
+  return { piece, addedLengthCm: ruffleHeight };
+}
+
+/**
+ * Generates ergonomic side-seam "Bolsa de Bolsillo" ("Cortar 4 piezas").
+ */
+export function buildPocketBagPiece(seamAllowance: SeamAllowance): PatternPiece {
+  const bagW = 18;
+  const openingH = 14.5;
+  const totalH = 26;
+
+  const pocketSeam: PathCommand[] = [
+    { type: "M", x: 0, y: 0 },
+    { type: "L", x: bagW * 0.65, y: 0 },
+    {
+      type: "C",
+      cp1x: bagW * 0.95,
+      cp1y: 1.5,
+      cp2x: bagW,
+      cp2y: 6,
+      x: bagW,
+      y: openingH + 2,
+    },
+    {
+      type: "C",
+      cp1x: bagW,
+      cp1y: totalH - 2,
+      cp2x: bagW * 0.55,
+      cp2y: totalH,
+      x: bagW * 0.32,
+      y: totalH,
+    },
+    {
+      type: "C",
+      cp1x: 1.5,
+      cp1y: totalH,
+      cp2x: 0,
+      cp2y: openingH + 5,
+      x: 0,
+      y: openingH,
+    },
+    { type: "L", x: 0, y: 0 },
+    { type: "Z" },
+  ];
+
+  return normalizePiece(
+    {
+      id: "pocket_bag",
+      name: "BOLSA DE BOLSILLO (x4)",
+      subtitle: "Cortar 4 piezas",
+      tabLabel: "Bolsa de Bolsillo",
+      seamPath: pocketSeam,
+      grainline: {
+        x1: bagW * 0.48,
+        y1: 3,
+        x2: bagW * 0.48,
+        y2: totalH - 4,
+      },
+      notches: [
+        { x: 0, y: 0.5, angle: 180, label: "Bolsillo sup." },
+        { x: 0, y: openingH, angle: 180, label: "Bolsillo inf." },
+      ],
+      labelPos: { x: bagW * 0.52, y: totalH * 0.46 },
+    },
+    seamAllowance
+  );
+}
+
+/**
+ * Computes two side-seam pocket notches interpolated between waist and hip.
+ */
+export function createSidePocketNotches(params: {
+  waistX: number;
+  waistY: number;
+  hipX: number;
+  hipY: number;
+  angle?: number;
+}): PatternNotch[] {
+  const { waistX, waistY, hipX, hipY, angle = 0 } = params;
+  const spanY = Math.max(12, hipY - waistY);
+  const topT = Math.min(0.32, 4 / spanY);
+  const botT = Math.min(0.92, (4 + 14) / spanY);
+  const lerpX = (t: number) => Number((waistX + (hipX - waistX) * t).toFixed(2));
+  const lerpY = (t: number) => Number((waistY + (hipY - waistY) * t).toFixed(2));
+
+  return [
+    { x: lerpX(topT), y: lerpY(topT), angle, label: "Bolsillo sup." },
+    { x: lerpX(botT), y: lerpY(botT), angle, label: "Bolsillo inf." },
+  ];
+}
+
+/**
+ * Shared waistband ("Pretina") piece scaled to waist circumference + 4 cm overlap.
+ */
+export function buildWaistbandPiece(
+  effWaist: number,
+  seamAllowance: SeamAllowance
+): PatternPiece {
+  const waistbandLength = Number((effWaist + 4).toFixed(1));
+  const waistbandHeight = 8;
+  const waistbandSeam: PathCommand[] = [
+    { type: "M", x: 0, y: 0 },
+    { type: "L", x: waistbandLength, y: 0 },
+    { type: "L", x: waistbandLength, y: waistbandHeight },
+    { type: "L", x: 0, y: waistbandHeight },
+    { type: "Z" },
+  ];
+
+  return normalizePiece(
+    {
+      id: "waistband",
+      name: "PRETINA (x1)",
+      subtitle: `${waistbandLength} × ${waistbandHeight} cm (incluye 4 cm cruce)`,
+      tabLabel: "Pretina",
+      seamPath: waistbandSeam,
+      grainline: {
+        x1: 4,
+        y1: waistbandHeight / 2,
+        x2: waistbandLength - 4,
+        y2: waistbandHeight / 2,
+      },
+      notches: [
+        { x: 4, y: 0, angle: -90, label: "Cruce" },
+        { x: waistbandLength / 2, y: 0, angle: -90, label: "Centro" },
+      ],
+      labelPos: { x: waistbandLength / 2, y: waistbandHeight * 0.52 },
+    },
+    seamAllowance
+  );
+}
+
+/**
+ * Generates shirt collar ("Cuello Camisero") and front button placket ("Vista de Botones")
+ * for shirt dresses and collared button-down garments.
+ */
+export function buildShirtDressDetailPieces(params: {
+  neckW: number;
+  frontLengthCm: number;
+  seamAllowance: SeamAllowance;
+}): PatternPiece[] {
+  const { neckW, frontLengthCm, seamAllowance } = params;
+  const halfCollar = Math.round(neckW * 2.95);
+  const collarH = 7.5;
+  const collarSeam: PathCommand[] = [
+    { type: "M", x: 0, y: 1.8 },
+    {
+      type: "C",
+      cp1x: halfCollar * 0.4,
+      cp1y: 1.5,
+      cp2x: halfCollar * 0.75,
+      cp2y: 0.6,
+      x: halfCollar,
+      y: 0,
+    },
+    { type: "L", x: halfCollar + 2.5, y: collarH + 1.2 },
+    {
+      type: "C",
+      cp1x: halfCollar * 0.65,
+      cp1y: collarH + 0.5,
+      cp2x: halfCollar * 0.3,
+      cp2y: collarH + 0.2,
+      x: 0,
+      y: collarH,
+    },
+    { type: "Z" },
+  ];
+
+  const collarPiece = normalizePiece(
+    {
+      id: "shirt_collar",
+      name: "CUELLO CAMISERO (x2)",
+      subtitle: "Cortar 2 piezas (entretela x1)",
+      tabLabel: "Cuello Camisero",
+      seamPath: collarSeam,
+      grainline: { x1: 3, y1: collarH * 0.55, x2: halfCollar - 2, y2: collarH * 0.55 },
+      notches: [{ x: 0, y: collarH, angle: 90, label: "Centro cuello" }],
+      labelPos: { x: halfCollar * 0.48, y: collarH * 0.58 },
+      foldLine: { x1: 0, y1: 1.8, x2: 0, y2: collarH },
+    },
+    seamAllowance
+  );
+
+  const placketW = 4.5;
+  const placketLen = Math.round(frontLengthCm);
+  const placketSeam: PathCommand[] = [
+    { type: "M", x: 0, y: 0 },
+    { type: "L", x: placketW, y: 0 },
+    { type: "L", x: placketW, y: placketLen },
+    { type: "L", x: 0, y: placketLen },
+    { type: "Z" },
+  ];
+
+  const placketPiece = normalizePiece(
+    {
+      id: "button_placket",
+      name: "VISTA DE BOTONES (x2)",
+      subtitle: `Cortar 2 piezas (${placketW} × ${placketLen} cm)`,
+      tabLabel: "Vista Botones",
+      seamPath: placketSeam,
+      grainline: { x1: placketW / 2, y1: 6, x2: placketW / 2, y2: placketLen - 6 },
+      notches: [
+        { x: placketW / 2, y: 12, angle: 0, label: "Botón 1" },
+        { x: placketW / 2, y: Math.round(placketLen * 0.35), angle: 0, label: "Botón 2" },
+        { x: placketW / 2, y: Math.round(placketLen * 0.58), angle: 0, label: "Botón 3" },
+      ],
+      labelPos: { x: placketW / 2, y: placketLen * 0.48 },
+    },
+    seamAllowance
+  );
+
+  return [collarPiece, placketPiece];
+}
