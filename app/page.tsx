@@ -1075,12 +1075,14 @@ export default function HomePage() {
             <AdBanner
               variant="mobile-banner"
               adSlotId="workspace-bottom-mobile-320x50"
+              mediaQuery="(max-width: 767px)"
             />
           </div>
           <div className="hidden md:flex justify-center w-full">
             <AdBanner
               variant="horizontal-banner"
               adSlotId="workspace-bottom-728x90"
+              mediaQuery="(min-width: 768px)"
             />
           </div>
         </section>

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useId, useRef, useSyncExternalStore } from "react";
 
 export type AdVariant =
   | "horizontal-banner"
@@ -12,6 +12,7 @@ interface AdBannerProps {
   variant: AdVariant;
   adSlotId?: string;
   className?: string;
+  mediaQuery?: string;
 }
 
 interface AdsterraUnitConfig {
@@ -32,7 +33,7 @@ const ADSTERRA_320X50: AdsterraUnitConfig = {
   key: "0fd4d8a023c84ccea8217c24b03449b5",
   width: 320,
   height: 50,
-  containerClass: "w-full max-w-[336px] mx-auto py-1.5 px-1 sm:px-2",
+  containerClass: "w-full max-w-[336px] mx-auto py-1.5 px-0 sm:px-2",
 };
 
 const ADSTERRA_300X250: AdsterraUnitConfig = {
@@ -49,50 +50,126 @@ const VARIANT_CONFIG: Record<AdVariant, AdsterraUnitConfig> = {
   "large-box": ADSTERRA_300X250,
 };
 
-function buildAdsterraSrcDoc(unit: AdsterraUnitConfig): string {
-  return `<!DOCTYPE html>
-<html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: transparent;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+interface AtOptionsPayload {
+  key: string;
+  format: "iframe";
+  height: number;
+  width: number;
+  container: string;
+  async: boolean;
+  params: Record<string, unknown>;
+}
+
+type WindowWithAdsterra = Window & {
+  atOptions?: AtOptionsPayload;
+};
+
+let adLoadQueue: Promise<void> = Promise.resolve();
+
+function enqueueAdScriptLoad(task: () => Promise<void>): void {
+  adLoadQueue = adLoadQueue
+    .catch(() => undefined)
+    .then(task)
+    .catch(() => undefined);
+}
+
+function useMediaQueryMatch(mediaQuery?: string): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      if (!mediaQuery || typeof window === "undefined") {
+        return () => {};
       }
-    </style>
-  </head>
-  <body>
-    <script>
-      atOptions = {
-        'key' : '${unit.key}',
-        'format' : 'iframe',
-        'height' : ${unit.height},
-        'width' : ${unit.width},
-        'params' : {}
-      };
-    </script>
-    <script src="https://bauval.org/22/${unit.key}"></script>
-  </body>
-</html>`;
+      const mql = window.matchMedia(mediaQuery);
+      mql.addEventListener("change", onStoreChange);
+      return () => mql.removeEventListener("change", onStoreChange);
+    },
+    () => {
+      if (!mediaQuery || typeof window === "undefined") {
+        return true;
+      }
+      return window.matchMedia(mediaQuery).matches;
+    },
+    () => !mediaQuery
+  );
 }
 
 /**
- * Contenedor publicitario aislado por iframe para Adsterra (728x90, 320x50 y 300x250).
+ * Contenedor publicitario para Adsterra (728x90, 320x50 y 300x250).
+ * Usa el modo asíncrono oficial (`async: true` + `container`) ejecutado en cola
+ * secuencial para evitar colisiones de `window.atOptions` y preservar el dominio
+ * y referrer reales en navegadores móviles (Android, iOS Safari y WebViews).
  */
 export default function AdBanner({
   variant,
   adSlotId = "0000000000",
   className = "",
+  mediaQuery,
 }: AdBannerProps) {
   const unit = VARIANT_CONFIG[variant];
-  const srcDoc = buildAdsterraSrcDoc(unit);
+  const rawId = useId();
+  const containerId = `adsterra-${adSlotId}-${rawId}`.replace(/[^a-zA-Z0-9_-]/g, "");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const matchesMedia = useMediaQueryMatch(mediaQuery);
+
+  useEffect(() => {
+    const hostEl = containerRef.current;
+    if (!matchesMedia) {
+      if (hostEl) {
+        hostEl.innerHTML = "";
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    enqueueAdScriptLoad(
+      () =>
+        new Promise<void>((resolve) => {
+          const host = containerRef.current;
+          if (cancelled || !host || !host.isConnected) {
+            resolve();
+            return;
+          }
+
+          host.innerHTML = "";
+          const win = window as WindowWithAdsterra;
+          win.atOptions = {
+            key: unit.key,
+            format: "iframe",
+            height: unit.height,
+            width: unit.width,
+            container: containerId,
+            async: true,
+            params: {},
+          };
+
+          const script = document.createElement("script");
+          script.async = true;
+          script.src = `https://bauval.org/22/${unit.key}`;
+
+          let finished = false;
+          const finish = () => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(safetyTimer);
+            resolve();
+          };
+
+          const safetyTimer = setTimeout(finish, 4000);
+          script.onload = finish;
+          script.onerror = finish;
+
+          host.appendChild(script);
+        })
+    );
+
+    return () => {
+      cancelled = true;
+      if (hostEl) {
+        hostEl.innerHTML = "";
+      }
+    };
+  }, [matchesMedia, unit.key, unit.height, unit.width, containerId]);
 
   return (
     <aside
@@ -107,22 +184,14 @@ export default function AdBanner({
       </span>
 
       <div className="w-full max-w-full overflow-x-auto flex items-center justify-center">
-        <iframe
-          title={`Publicidad ${unit.width}x${unit.height}`}
-          srcDoc={srcDoc}
-          width={unit.width}
-          height={unit.height}
-          scrolling="no"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
+        <div
+          id={containerId}
+          ref={containerRef}
           style={{
             width: `${unit.width}px`,
             height: `${unit.height}px`,
-            border: "none",
-            overflow: "hidden",
-            display: "block",
-            flexShrink: 0,
           }}
+          className="shrink-0 overflow-hidden flex items-center justify-center"
         />
       </div>
     </aside>
