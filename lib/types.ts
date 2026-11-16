@@ -17,7 +17,8 @@ export type TwoPieceBottomStyle =
   | "pants";
 
 export type NecklineStyle = "round" | "v_neck" | "square" | "high";
-export type SleeveStyle = "sleeveless" | "short" | "long";
+export type SleeveStyle = "sleeveless" | "short" | "long" | "kimono";
+export type TorsoFit = "fitted" | "loose";
 
 export type PaperFormat = "letter" | "a4";
 
@@ -75,6 +76,9 @@ export interface PatternPiece {
   grainline: { x1: number; y1: number; x2: number; y2: number };
   notches: PatternNotch[];
   labelPos: Point2D;
+  labelAngle?: number;
+  labelMaxSpanCm?: number;
+  labelBandWidthCm?: number;
   foldLine?: { x1: number; y1: number; x2: number; y2: number };
 }
 

@@ -7,8 +7,9 @@ import {
   QuickLengthPreset,
   SeamAllowance,
   SleeveStyle,
+  TorsoFit,
 } from "../types";
-import { normalizePiece } from "./geometry";
+import { cubicBezierLength, normalizePiece } from "./geometry";
 
 export const QUICK_LENGTH_LABELS: Record<QuickLengthPreset, string> = {
   photo: "Según medida / foto",
@@ -81,7 +82,176 @@ export function resolveQuickLength(
 }
 
 /**
+ * Resolves torso waist half-width based on fitted vs. bloused/loose silhouette.
+ * Loose silhouette eliminates inward waist shaping so the side seam runs wide & continuous.
+ */
+export function computeTorsoWaistHalfWidth(params: {
+  quarterBust: number;
+  quarterWaist: number;
+  quarterHip: number;
+  torsoFit?: TorsoFit;
+  minExtraOverWaist?: number;
+}): number {
+  const {
+    quarterBust,
+    quarterWaist,
+    quarterHip,
+    torsoFit = "fitted",
+    minExtraOverWaist = 0,
+  } = params;
+  if (torsoFit === "loose") {
+    return Math.max(
+      quarterBust,
+      quarterWaist + 2.5,
+      (quarterBust + quarterHip) * 0.49
+    );
+  }
+  return quarterWaist + minExtraOverWaist;
+}
+
+/**
+ * Shared integrated Kimono / Batwing sleeve geometry (no armhole cutout).
+ * Returns identical upper shoulder+sleeve and underarm dolman commands for Front & Back
+ * so seam lengths match 100% when sewn together.
+ */
+export function buildKimonoWingSegment(params: {
+  neckW: number;
+  shoulderX: number;
+  shoulderSlope: number;
+  sleeveLengthCm: number;
+  armholeDepth: number;
+  quarterBust: number;
+  sideWaistX: number;
+  sideWaistY: number;
+  torsoFit?: TorsoFit;
+  flaredSleeve?: boolean;
+}): {
+  commands: PathCommand[];
+  outerX: number;
+  outerDropY: number;
+  outerBotY: number;
+  joinX: number;
+  joinY: number;
+  shoulderSleeveLenCm: number;
+  underarmCurveLenCm: number;
+} {
+  const {
+    neckW,
+    shoulderX,
+    shoulderSlope,
+    sleeveLengthCm,
+    armholeDepth,
+    quarterBust,
+    sideWaistX,
+    sideWaistY,
+    torsoFit = "fitted",
+    flaredSleeve = false,
+  } = params;
+
+  const shoulderExt = Math.min(34, Math.max(18, sleeveLengthCm * 0.48));
+  const outerX = Number((shoulderX + shoulderExt).toFixed(2));
+  const shoulderSpan = Math.max(4, outerX - neckW);
+  const outerDropY = Number((shoulderSlope + shoulderExt * 0.25).toFixed(2));
+
+  const maxAvail = Math.max(15, sideWaistY - outerDropY - 3);
+  const rawOpening =
+    Math.max(18, armholeDepth * 0.92) +
+    (torsoFit === "loose" ? 2.5 : 0) +
+    (flaredSleeve ? 4.0 : 0);
+  const cuffOpening = Math.min(maxAvail, rawOpening);
+  const outerBotY = Number((outerDropY + cuffOpening).toFixed(2));
+
+  const joinY = Number(
+    Math.min(
+      sideWaistY - 1,
+      Math.max(
+        outerBotY + 2,
+        armholeDepth + Math.min(13, Math.max(4, (sideWaistY - armholeDepth) * 0.65))
+      )
+    ).toFixed(2)
+  );
+  const tJoin = Math.min(
+    1,
+    Math.max(0, (joinY - armholeDepth) / Math.max(4, sideWaistY - armholeDepth))
+  );
+  const joinX = Number(
+    (quarterBust + (sideWaistX - quarterBust) * tJoin).toFixed(2)
+  );
+
+  const shoulderCp1 = {
+    x: neckW + shoulderSpan * 0.42,
+    y: shoulderSlope * 0.65,
+  };
+  const shoulderCp2 = {
+    x: shoulderX + shoulderExt * 0.35,
+    y: shoulderSlope + shoulderExt * 0.1,
+  };
+
+  const spanX = Math.max(6, outerX - joinX);
+  const spanY = Math.max(2, joinY - outerBotY);
+  const underCp1 = {
+    x: outerX - spanX * 0.52,
+    y: outerBotY + spanY * 0.08,
+  };
+  const underCp2 = {
+    x: joinX + spanX * 0.08,
+    y: outerBotY + spanY * 0.45,
+  };
+
+  const commands: PathCommand[] = [
+    {
+      type: "C",
+      cp1x: shoulderCp1.x,
+      cp1y: shoulderCp1.y,
+      cp2x: shoulderCp2.x,
+      cp2y: shoulderCp2.y,
+      x: outerX,
+      y: outerDropY,
+    },
+    { type: "L", x: outerX, y: outerBotY },
+    {
+      type: "C",
+      cp1x: underCp1.x,
+      cp1y: underCp1.y,
+      cp2x: underCp2.x,
+      cp2y: underCp2.y,
+      x: joinX,
+      y: joinY,
+    },
+  ];
+
+  const shoulderSleeveLenCm = Number(
+    cubicBezierLength(
+      { x: neckW, y: 0 },
+      shoulderCp1,
+      shoulderCp2,
+      { x: outerX, y: outerDropY }
+    ).toFixed(1)
+  );
+  const underarmCurveLenCm = Number(
+    cubicBezierLength(
+      { x: outerX, y: outerBotY },
+      underCp1,
+      underCp2,
+      { x: joinX, y: joinY }
+    ).toFixed(1)
+  );
+
+  return {
+    commands,
+    outerX,
+    outerDropY,
+    outerBotY,
+    joinX,
+    joinY,
+    shoulderSleeveLenCm,
+    underarmCurveLenCm,
+  };
+}
+
+/**
  * Shared sleeve builder supporting standard sleeves and bell/flared sleeves.
+ * Returns null when sleeveless or integrated kimono/batwing is active.
  */
 export function buildSleevePiece(params: {
   armholeDepth: number;
@@ -100,11 +270,14 @@ export function buildSleevePiece(params: {
     seamAllowance,
   } = params;
 
+  if (sleeveStyle === "kimono") {
+    return null;
+  }
   if (sleeveStyle === "sleeveless" && !flaredSleeve) {
     return null;
   }
 
-  const effectiveStyle: Exclude<SleeveStyle, "sleeveless"> =
+  const effectiveStyle: Exclude<SleeveStyle, "sleeveless" | "kimono"> =
     sleeveStyle === "sleeveless" ? "short" : sleeveStyle;
 
   const capHeight = Math.max(12, armholeDepth * 0.65);
@@ -238,7 +411,7 @@ export function buildSleevePiece(params: {
 
 /**
  * Generates the matching wrap neckline facing ("Vista de Escote Cruzado")
- * following the exact diagonal wrap curve of the asymmetric front piece.
+ * with a clean 4.0 cm finished perpendicular width along the exact crossover V-curve.
  */
 export function buildWrapFacingPiece(params: {
   neckW: number;
@@ -257,62 +430,86 @@ export function buildWrapFacingPiece(params: {
     seamAllowance,
   } = params;
 
-  const facingW = 5.2;
+  // True perpendicular width of 4.0 cm (+ seamAllowance added by normalizePiece)
+  const facingPerpW = 4.0;
+  const vx = neckW + wrapOverlap;
+  const vy = -wrapWaistY;
+  const diagLen = Math.hypot(vx, vy) || 1;
+  // Inward unit normal pointing from wrap edge into the body (+x, +y)
+  const nx = -vy / diagLen;
+  const ny = vx / diagLen;
+
   const shoulderLen = Math.max(0.1, shoulderX - neckW);
   const shoulderTan = shoulderSlope / shoulderLen;
-  const shOutX = Math.min(shoulderX - 1.5, neckW + facingW);
-  const shOutY = (shOutX - neckW) * shoulderTan;
+  const shDeltaX = facingPerpW / Math.max(0.35, nx + shoulderTan * ny);
+  const shOutX = Number((neckW + shDeltaX).toFixed(2));
+  const shOutY = Number((shDeltaX * shoulderTan).toFixed(2));
+
+  const cp1xOut = -wrapOverlap * 0.35;
+  const cp1yOut = wrapWaistY * 0.62;
+  const cp2xOut = neckW * 0.55;
+  const cp2yOut = wrapWaistY * 0.25;
+
+  const botInX = Number((-wrapOverlap + facingPerpW / Math.max(0.4, nx)).toFixed(2));
 
   // Outer diagonal matches wrap front edge from (neckW, 0) -> (-wrapOverlap, wrapWaistY)
   const facingSeam: PathCommand[] = [
     { type: "M", x: neckW, y: 0 },
     { type: "L", x: shOutX, y: shOutY },
-    // Inner facing curve offset by +facingW along the wrap diagonal
+    // Inner facing edge shifted by +4.0 cm perpendicularly along normal (nx, ny)
     {
       type: "C",
-      cp1x: neckW * 0.55 + facingW,
-      cp1y: wrapWaistY * 0.25 + 2.5,
-      cp2x: -wrapOverlap * 0.35 + facingW,
-      cp2y: wrapWaistY * 0.62 + 2.0,
-      x: -wrapOverlap + facingW,
-      y: wrapWaistY + 2.5,
+      cp1x: cp2xOut + nx * facingPerpW,
+      cp1y: cp2yOut + ny * facingPerpW,
+      cp2x: cp1xOut + nx * facingPerpW,
+      cp2y: cp1yOut + ny * facingPerpW,
+      x: botInX,
+      y: wrapWaistY,
     },
-    { type: "L", x: -wrapOverlap, y: wrapWaistY + 2.5 },
     { type: "L", x: -wrapOverlap, y: wrapWaistY },
     // Exact wrap front edge curve back up to shoulder-neck
     {
       type: "C",
-      cp1x: -wrapOverlap * 0.35,
-      cp1y: wrapWaistY * 0.62,
-      cp2x: neckW * 0.55,
-      cp2y: wrapWaistY * 0.25,
+      cp1x: cp1xOut,
+      cp1y: cp1yOut,
+      cp2x: cp2xOut,
+      cp2y: cp2yOut,
       x: neckW,
       y: 0,
     },
     { type: "Z" },
   ];
 
-  const midX = (neckW - wrapOverlap) / 2 + facingW * 0.5;
-  const midY = wrapWaistY * 0.52;
+  // Evaluate exact cubic midpoint t=0.5 along outer wrap edge and shift by half of 4.0 cm normal
+  const midOutX =
+    0.125 * -wrapOverlap + 0.375 * cp1xOut + 0.375 * cp2xOut + 0.125 * neckW;
+  const midOutY =
+    0.125 * wrapWaistY + 0.375 * cp1yOut + 0.375 * cp2yOut + 0.125 * 0;
+  const midX = Number((midOutX + nx * (facingPerpW * 0.5)).toFixed(2));
+  const midY = Number((midOutY + ny * (facingPerpW * 0.5)).toFixed(2));
+  const labelAngle = Number(((Math.atan2(vy, vx) * 180) / Math.PI).toFixed(1));
 
   return normalizePiece(
     {
       id: "wrap_facing",
       name: "VISTA DE ESCOTE CRUZADO (x2)",
-      subtitle: "Cortar 2 piezas (Izquierda y Derecha)",
-      tabLabel: "Vista Escote Cruzado",
+      subtitle: "Ancho 4 cm | Cortar 2 piezas (Izq. y Der.)",
+      tabLabel: "Vista Escote",
       seamPath: facingSeam,
       grainline: {
-        x1: midX + 0.5,
-        y1: Math.max(6, midY - 8),
-        x2: midX + 0.5,
-        y2: Math.min(wrapWaistY, midY + 8),
+        x1: midX,
+        y1: Math.max(6, midY - 7),
+        x2: midX,
+        y2: Math.min(wrapWaistY - 3, midY + 7),
       },
       notches: [
         { x: neckW, y: 0, angle: -90, label: "Hombro" },
         { x: -wrapOverlap, y: wrapWaistY, angle: 180, label: "Cruce cintura" },
       ],
       labelPos: { x: midX, y: midY },
+      labelAngle,
+      labelMaxSpanCm: Number((diagLen * 0.78).toFixed(1)),
+      labelBandWidthCm: facingPerpW,
     },
     seamAllowance
   );
@@ -352,6 +549,9 @@ export function buildWaistTiePiece(
       },
       notches: [{ x: 0, y: tieHeight / 2, angle: 180, label: "Unión costado" }],
       labelPos: { x: tieLength * 0.48, y: tieHeight * 0.52 },
+      labelAngle: 0,
+      labelMaxSpanCm: tieLength - 10,
+      labelBandWidthCm: tieHeight,
     },
     seamAllowance
   );
@@ -541,6 +741,9 @@ export function buildWaistbandPiece(
         { x: waistbandLength / 2, y: 0, angle: -90, label: "Centro" },
       ],
       labelPos: { x: waistbandLength / 2, y: waistbandHeight * 0.52 },
+      labelAngle: 0,
+      labelMaxSpanCm: waistbandLength - 8,
+      labelBandWidthCm: waistbandHeight,
     },
     seamAllowance
   );
@@ -592,6 +795,9 @@ export function buildShirtDressDetailPieces(params: {
       grainline: { x1: 3, y1: collarH * 0.55, x2: halfCollar - 2, y2: collarH * 0.55 },
       notches: [{ x: 0, y: collarH, angle: 90, label: "Centro cuello" }],
       labelPos: { x: halfCollar * 0.48, y: collarH * 0.58 },
+      labelAngle: 0,
+      labelMaxSpanCm: halfCollar - 3,
+      labelBandWidthCm: collarH,
       foldLine: { x1: 0, y1: 1.8, x2: 0, y2: collarH },
     },
     seamAllowance
@@ -621,6 +827,9 @@ export function buildShirtDressDetailPieces(params: {
         { x: placketW / 2, y: Math.round(placketLen * 0.58), angle: 0, label: "Botón 3" },
       ],
       labelPos: { x: placketW / 2, y: placketLen * 0.48 },
+      labelAngle: -90,
+      labelMaxSpanCm: placketLen - 8,
+      labelBandWidthCm: placketW,
     },
     seamAllowance
   );

@@ -5,6 +5,7 @@ import {
   PatternPiece,
   Point2D,
   SeamAllowance,
+  TorsoFit,
 } from "../types";
 
 export function commandsToSvgPath(commands: PathCommand[]): string {
@@ -428,12 +429,18 @@ export function buildNecklineCommand(
   ];
 }
 
-export function computeEase(fabricType: FabricType, extraJacketEaseCm = 0) {
+export function computeEase(
+  fabricType: FabricType,
+  extraJacketEaseCm = 0,
+  torsoFit: TorsoFit = "fitted"
+) {
   const easeFactor = fabricType === "woven" ? 1 : 0.95;
-  const flatEase = (fabricType === "woven" ? 2 : 0) + extraJacketEaseCm;
+  const blousedEase = torsoFit === "loose" ? 5 : 0;
+  const flatEase = (fabricType === "woven" ? 2 : 0) + extraJacketEaseCm + blousedEase;
+  const fitSuffix = torsoFit === "loose" ? " • Holgado/Blusado" : "";
   const label =
     fabricType === "woven"
-      ? `Tela normal (+${flatEase} cm de soltura)`
-      : `Tela que estira (ajuste elástico${extraJacketEaseCm > 0 ? ` +${extraJacketEaseCm} cm` : ""})`;
+      ? `Tela normal (+${flatEase} cm soltura${fitSuffix})`
+      : `Tela que estira (ajuste elástico${flatEase > 0 ? ` +${flatEase} cm` : ""}${fitSuffix})`;
   return { easeFactor, flatEase, label };
 }

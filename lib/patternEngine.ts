@@ -14,6 +14,7 @@ import {
   SolvedTracingProportions,
   StyleVariant,
   TopSubStyle,
+  TorsoFit,
   TwoPieceBottomStyle,
   TwoPieceTopStyle,
 } from "./types";
@@ -37,6 +38,7 @@ export interface GenerateUniversalPatternInput {
   twoPieceBottomStyle: TwoPieceBottomStyle;
   necklineStyle: NecklineStyle;
   sleeveStyle: SleeveStyle;
+  torsoFit?: TorsoFit;
   measurements: Measurements;
   seamAllowance: SeamAllowance;
   fabricType: FabricType;
@@ -59,6 +61,7 @@ export function generateUniversalPattern(
     twoPieceBottomStyle,
     necklineStyle,
     sleeveStyle,
+    torsoFit = "fitted",
     measurements,
     seamAllowance,
     fabricType,
@@ -88,6 +91,7 @@ export function generateUniversalPattern(
         subStyle: topSubStyle,
         necklineStyle,
         sleeveStyle,
+        torsoFit,
         seamAllowance,
         fabricType,
         necklineDropRatio: tracingProportions?.necklineDropRatio,
@@ -121,6 +125,7 @@ export function generateUniversalPattern(
         necklineStyle,
         skirtFlareStyle: skirtSubStyle,
         sleeveStyle,
+        torsoFit,
         seamAllowance,
         fabricType,
         necklineDropRatio: tracingProportions?.necklineDropRatio,
@@ -138,6 +143,7 @@ export function generateUniversalPattern(
         pantsSubStyle,
         necklineStyle,
         sleeveStyle,
+        torsoFit,
         seamAllowance,
         fabricType,
         necklineDropRatio: tracingProportions?.necklineDropRatio,

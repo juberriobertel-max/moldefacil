@@ -10,6 +10,7 @@ import {
   SleeveStyle,
   StyleVariant,
   TopSubStyle,
+  TorsoFit,
 } from "../types";
 import {
   buildNecklineCommand,
@@ -21,10 +22,12 @@ import {
 } from "./geometry";
 import {
   buildHemRufflePiece,
+  buildKimonoWingSegment,
   buildPocketBagPiece,
   buildSleevePiece,
   buildWaistTiePiece,
   buildWrapFacingPiece,
+  computeTorsoWaistHalfWidth,
   createSidePocketNotches,
 } from "./extrasEngine";
 
@@ -33,6 +36,7 @@ export interface TopEngineInput {
   subStyle: TopSubStyle;
   necklineStyle: NecklineStyle;
   sleeveStyle?: SleeveStyle;
+  torsoFit?: TorsoFit;
   seamAllowance: SeamAllowance;
   fabricType: FabricType;
   necklineDropRatio?: number;
@@ -47,6 +51,7 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
     subStyle,
     necklineStyle,
     sleeveStyle = "short",
+    torsoFit = "fitted",
     seamAllowance,
     fabricType,
     necklineDropRatio,
@@ -57,7 +62,11 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
 
   // Jacket gets +4 cm extra outer ease
   const extraEase = subStyle === "jacket" ? 4 : subStyle === "blouse" ? 1 : 0;
-  const { easeFactor, flatEase, label } = computeEase(fabricType, extraEase);
+  const { easeFactor, flatEase, label } = computeEase(
+    fabricType,
+    extraEase,
+    torsoFit
+  );
 
   const effBust = measurements.bust * easeFactor + flatEase;
   const effWaist = measurements.waist * easeFactor + flatEase;
@@ -67,14 +76,22 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   const quarterBust = effBust / 4;
   const quarterWaist = effWaist / 4;
   const quarterHip = effHip / 4;
+  const torsoWaistX = computeTorsoWaistHalfWidth({
+    quarterBust,
+    quarterWaist,
+    quarterHip,
+    torsoFit,
+  });
   const halfBack = effBack / 2;
 
   const bodiceLen = measurements.bodiceLength * lengthMultiplier;
   const hipExt = (subStyle === "jacket" ? 18 : 14) * lengthMultiplier;
   const totalLen = bodiceLen + hipExt;
 
+  const isKimono = sleeveStyle === "kimono";
   const isPeasant = styleVariant === "peasant_offshoulder";
-  const isOfficeDart = styleVariant === "office_dart";
+  const isOfficeDart =
+    styleVariant === "office_dart" && torsoFit === "fitted";
 
   const neckW = Math.max(6.2, effBust * (isPeasant ? 0.115 : 0.075));
   const baseNeckDrop =
@@ -93,7 +110,22 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   const shoulderX = Math.max(neckW + 6, halfBack + 1.5);
   const armholeDepth = Math.max(17, effBust * 0.215);
 
-  // Compute exact armhole arc lengths (front & back) for sleeve cap matching
+  // Shared Kimono wing OR separate front/back armhole lengths
+  const kimonoWing = isKimono
+    ? buildKimonoWingSegment({
+        neckW,
+        shoulderX,
+        shoulderSlope,
+        sleeveLengthCm: measurements.sleeveLength,
+        armholeDepth,
+        quarterBust,
+        sideWaistX: torsoWaistX,
+        sideWaistY: bodiceLen,
+        torsoFit,
+        flaredSleeve: extras?.flaredSleeve,
+      })
+    : null;
+
   const frontArmholeLen = cubicBezierLength(
     { x: shoulderX, y: shoulderSlope },
     { x: shoulderX - 1.5, y: armholeDepth * 0.55 },
@@ -114,17 +146,16 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   const wrapOverlap = Math.round(quarterWaist * 0.6);
   const pocketNotches = extras?.sidePockets
     ? createSidePocketNotches({
-        waistX: quarterWaist,
+        waistX: torsoWaistX,
         waistY: Math.max(armholeDepth + 4, bodiceLen - 6),
         hipX: quarterHip,
         hipY: totalLen,
       })
     : [];
 
-  // 1. DELANTERO (simétrico al doblez o Frente Cruzado)
-  const frontSeam: PathCommand[] = isWrapFront
-    ? [
-        { type: "M", x: neckW, y: 0 },
+  const frontUpperSide: PathCommand[] = kimonoWing
+    ? [...kimonoWing.commands, { type: "L", x: torsoWaistX, y: bodiceLen }]
+    : [
         { type: "L", x: shoulderX, y: shoulderSlope },
         {
           type: "C",
@@ -135,10 +166,17 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
           x: quarterBust,
           y: armholeDepth,
         },
-        { type: "L", x: quarterWaist, y: bodiceLen },
+        { type: "L", x: torsoWaistX, y: bodiceLen },
+      ];
+
+  // 1. DELANTERO (simétrico al doblez o Frente Cruzado)
+  const frontSeam: PathCommand[] = isWrapFront
+    ? [
+        { type: "M", x: neckW, y: 0 },
+        ...frontUpperSide,
         {
           type: "C",
-          cp1x: quarterWaist + (quarterHip - quarterWaist) * 0.45,
+          cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.45,
           cp1y: bodiceLen + hipExt * 0.35,
           cp2x: quarterHip,
           cp2y: bodiceLen + hipExt * 0.75,
@@ -161,20 +199,10 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
     : [
         { type: "M", x: 0, y: frontNeckDrop },
         ...buildNecklineCommand(neckW, frontNeckDrop, necklineStyle),
-        { type: "L", x: shoulderX, y: shoulderSlope },
+        ...frontUpperSide,
         {
           type: "C",
-          cp1x: shoulderX - 1.5,
-          cp1y: armholeDepth * 0.55,
-          cp2x: quarterBust * 0.84,
-          cp2y: armholeDepth,
-          x: quarterBust,
-          y: armholeDepth,
-        },
-        { type: "L", x: quarterWaist, y: bodiceLen },
-        {
-          type: "C",
-          cp1x: quarterWaist + (quarterHip - quarterWaist) * 0.45,
+          cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.45,
           cp1y: bodiceLen + hipExt * 0.35,
           cp2x: quarterHip,
           cp2y: bodiceLen + hipExt * 0.75,
@@ -195,8 +223,12 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
             ? "DELANTERO CHAQUETA (x2)"
             : "DELANTERO (x1 al doblez)",
         subtitle: isWrapFront
-          ? "Cortar 2 piezas (Izquierda y Derecha)"
-          : `Sisa: ${frontArmholeLen.toFixed(1)} cm`,
+          ? kimonoWing
+            ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Cortar 2 piezas`
+            : "Cortar 2 piezas (Izquierda y Derecha)"
+          : kimonoWing
+            ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoWing.underarmCurveLenCm} cm`
+            : `Sisa: ${frontArmholeLen.toFixed(1)} cm`,
         tabLabel: isWrapFront ? "Delantero Cruzado" : "Delantero",
         seamPath: frontSeam,
         grainline: {
@@ -206,8 +238,28 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
           y2: totalLen - 6,
         },
         notches: [
-          { x: quarterBust, y: armholeDepth, angle: 0, label: "Sisa" },
-          { x: quarterWaist, y: bodiceLen, angle: 0, label: "Cintura" },
+          ...(kimonoWing
+            ? [
+                {
+                  x: kimonoWing.outerX,
+                  y: kimonoWing.outerDropY,
+                  angle: 0,
+                  label: "Puño Kimono",
+                },
+                {
+                  x: kimonoWing.joinX,
+                  y: kimonoWing.joinY,
+                  angle: 0,
+                  label: "Axila",
+                },
+              ]
+            : [{ x: quarterBust, y: armholeDepth, angle: 0, label: "Sisa" }]),
+          {
+            x: torsoWaistX,
+            y: bodiceLen,
+            angle: 0,
+            label: torsoFit === "loose" ? "Cintura holgada" : "Cintura",
+          },
           ...(isWrapFront
             ? [
                 {
@@ -260,23 +312,29 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   }
 
   // 2. TRASERO
+  const backUpperSide: PathCommand[] = kimonoWing
+    ? [...kimonoWing.commands, { type: "L", x: torsoWaistX, y: bodiceLen }]
+    : [
+        { type: "L", x: shoulderX, y: shoulderSlope },
+        {
+          type: "C",
+          cp1x: shoulderX - 0.5,
+          cp1y: armholeDepth * 0.58,
+          cp2x: quarterBust * 0.87,
+          cp2y: armholeDepth,
+          x: quarterBust,
+          y: armholeDepth,
+        },
+        { type: "L", x: torsoWaistX, y: bodiceLen },
+      ];
+
   const backSeam: PathCommand[] = [
     { type: "M", x: 0, y: backNeckDrop },
     ...buildNecklineCommand(neckW, backNeckDrop, "round"),
-    { type: "L", x: shoulderX, y: shoulderSlope },
+    ...backUpperSide,
     {
       type: "C",
-      cp1x: shoulderX - 0.5,
-      cp1y: armholeDepth * 0.58,
-      cp2x: quarterBust * 0.87,
-      cp2y: armholeDepth,
-      x: quarterBust,
-      y: armholeDepth,
-    },
-    { type: "L", x: quarterWaist, y: bodiceLen },
-    {
-      type: "C",
-      cp1x: quarterWaist + (quarterHip - quarterWaist) * 0.45,
+      cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.45,
       cp1y: bodiceLen + hipExt * 0.35,
       cp2x: quarterHip,
       cp2y: bodiceLen + hipExt * 0.75,
@@ -292,7 +350,9 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
       {
         id: "back",
         name: "TRASERO (x1 al doblez)",
-        subtitle: `Sisa: ${backArmholeLen.toFixed(1)} cm`,
+        subtitle: kimonoWing
+          ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoWing.underarmCurveLenCm} cm`
+          : `Sisa: ${backArmholeLen.toFixed(1)} cm`,
         tabLabel: "Trasero",
         seamPath: backSeam,
         grainline: {
@@ -302,8 +362,28 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
           y2: totalLen - 6,
         },
         notches: [
-          { x: quarterBust, y: armholeDepth, angle: 0, label: "Sisa" },
-          { x: quarterWaist, y: bodiceLen, angle: 0, label: "Cintura" },
+          ...(kimonoWing
+            ? [
+                {
+                  x: kimonoWing.outerX,
+                  y: kimonoWing.outerDropY,
+                  angle: 0,
+                  label: "Puño Kimono",
+                },
+                {
+                  x: kimonoWing.joinX,
+                  y: kimonoWing.joinY,
+                  angle: 0,
+                  label: "Axila",
+                },
+              ]
+            : [{ x: quarterBust, y: armholeDepth, angle: 0, label: "Sisa" }]),
+          {
+            x: torsoWaistX,
+            y: bodiceLen,
+            angle: 0,
+            label: torsoFit === "loose" ? "Cintura holgada" : "Cintura",
+          },
         ],
         labelPos: { x: quarterWaist * 0.48, y: bodiceLen * 0.7 },
         foldLine: { x1: 0, y1: backNeckDrop, x2: 0, y2: totalLen },
@@ -312,7 +392,7 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
     )
   );
 
-  // 3. MANGA (estándar o acampanada)
+  // 3. MANGA (estándar o acampanada; omitida en Kimono/Murciélago)
   const sleevePiece = buildSleevePiece({
     armholeDepth,
     totalArmholePerimeter,
@@ -350,6 +430,9 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
           grainline: { x1: 3, y1: collarH / 2, x2: collarLen - 3, y2: collarH / 2 },
           notches: [{ x: collarLen / 2, y: 0, angle: -90, label: "Centro" }],
           labelPos: { x: collarLen / 2, y: collarH * 0.55 },
+          labelAngle: 0,
+          labelMaxSpanCm: collarLen - 4,
+          labelBandWidthCm: collarH,
         },
         seamAllowance
       )

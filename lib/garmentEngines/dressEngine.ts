@@ -11,6 +11,7 @@ import {
   SkirtSubStyle,
   SleeveStyle,
   StyleVariant,
+  TorsoFit,
 } from "../types";
 import {
   buildNecklineCommand,
@@ -22,11 +23,13 @@ import {
 } from "./geometry";
 import {
   buildHemRufflePiece,
+  buildKimonoWingSegment,
   buildPocketBagPiece,
   buildShirtDressDetailPieces,
   buildSleevePiece,
   buildWaistTiePiece,
   buildWrapFacingPiece,
+  computeTorsoWaistHalfWidth,
   createSidePocketNotches,
 } from "./extrasEngine";
 
@@ -36,6 +39,7 @@ export interface DressEngineInput {
   necklineStyle: NecklineStyle;
   skirtFlareStyle: SkirtSubStyle;
   sleeveStyle?: SleeveStyle;
+  torsoFit?: TorsoFit;
   seamAllowance: SeamAllowance;
   fabricType: FabricType;
   necklineDropRatio?: number;
@@ -53,6 +57,7 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
     necklineStyle,
     skirtFlareStyle,
     sleeveStyle = "short",
+    torsoFit = "fitted",
     seamAllowance,
     fabricType,
     necklineDropRatio,
@@ -63,7 +68,7 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
     styleVariant = "default",
   } = input;
 
-  const { easeFactor, flatEase, label } = computeEase(fabricType, 0);
+  const { easeFactor, flatEase, label } = computeEase(fabricType, 0, torsoFit);
 
   const effBust = measurements.bust * easeFactor + flatEase;
   const effWaist = measurements.waist * easeFactor + flatEase;
@@ -73,6 +78,12 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
   const quarterBust = effBust / 4;
   const quarterWaist = effWaist / 4;
   const quarterHip = effHip / 4;
+  const torsoWaistX = computeTorsoWaistHalfWidth({
+    quarterBust,
+    quarterWaist,
+    quarterHip,
+    torsoFit,
+  });
   const halfBack = effBack / 2;
 
   const combinedLen =
@@ -90,6 +101,7 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
       : measurements.bodiceLength;
   const lowerLen = Math.max(35, combinedLen - bodiceLen);
 
+  const isKimono = sleeveStyle === "kimono";
   const neckW = Math.max(6.2, effBust * 0.075);
   const baseNeckDrop =
     necklineStyle === "v_neck"
@@ -106,6 +118,21 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
   const shoulderSlope = 2.8;
   const shoulderX = Math.max(neckW + 6, halfBack + 1.5);
   const armholeDepth = Math.max(17, effBust * 0.215);
+
+  const kimonoWing = isKimono
+    ? buildKimonoWingSegment({
+        neckW,
+        shoulderX,
+        shoulderSlope,
+        sleeveLengthCm: measurements.sleeveLength,
+        armholeDepth,
+        quarterBust,
+        sideWaistX: torsoWaistX,
+        sideWaistY: bodiceLen,
+        torsoFit,
+        flaredSleeve: extras?.flaredSleeve,
+      })
+    : null;
 
   const frontArmholeLen = cubicBezierLength(
     { x: shoulderX, y: shoulderSlope },
@@ -142,7 +169,7 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
 
     const sidePocketNotches = extras?.sidePockets
       ? createSidePocketNotches({
-          waistX: quarterWaist,
+          waistX: torsoWaistX,
           waistY: bodiceLen,
           hipX: quarterHip,
           hipY: bodiceLen + hipDrop,
@@ -159,23 +186,29 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
       const neckStyle = isFront ? necklineStyle : "round";
       const useWrap = isFront && isWrapFront;
 
-      const seam: PathCommand[] = useWrap
-        ? [
-            { type: "M", x: neckW, y: 0 },
+      const upperSideCommands: PathCommand[] = kimonoWing
+        ? [...kimonoWing.commands, { type: "L", x: torsoWaistX, y: bodiceLen }]
+        : [
             { type: "L", x: shoulderX, y: shoulderSlope },
             {
               type: "C",
-              cp1x: shoulderX - 1.5,
-              cp1y: armholeDepth * 0.55,
-              cp2x: quarterBust * 0.84,
+              cp1x: shoulderX - (isFront ? 1.5 : 0.6),
+              cp1y: armholeDepth * (isFront ? 0.55 : 0.58),
+              cp2x: quarterBust * (isFront ? 0.84 : 0.87),
               cp2y: armholeDepth,
               x: quarterBust,
               y: armholeDepth,
             },
-            { type: "L", x: quarterWaist, y: bodiceLen },
+            { type: "L", x: torsoWaistX, y: bodiceLen },
+          ];
+
+      const seam: PathCommand[] = useWrap
+        ? [
+            { type: "M", x: neckW, y: 0 },
+            ...upperSideCommands,
             {
               type: "C",
-              cp1x: quarterWaist + (quarterHip - quarterWaist) * 0.45,
+              cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.45,
               cp1y: bodiceLen + hipDrop * 0.35,
               cp2x: quarterHip,
               cp2y: bodiceLen + hipDrop * 0.72,
@@ -207,21 +240,10 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
         : [
             { type: "M", x: 0, y: neckDrop },
             ...buildNecklineCommand(neckW, neckDrop, neckStyle),
-            { type: "L", x: shoulderX, y: shoulderSlope },
+            ...upperSideCommands,
             {
               type: "C",
-              cp1x: shoulderX - (isFront ? 1.5 : 0.6),
-              cp1y: armholeDepth * (isFront ? 0.55 : 0.58),
-              cp2x: quarterBust * (isFront ? 0.84 : 0.87),
-              cp2y: armholeDepth,
-              x: quarterBust,
-              y: armholeDepth,
-            },
-            // Exact waist assembly
-            { type: "L", x: quarterWaist, y: bodiceLen },
-            {
-              type: "C",
-              cp1x: quarterWaist + (quarterHip - quarterWaist) * 0.45,
+              cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.45,
               cp1y: bodiceLen + hipDrop * 0.35,
               cp2x: quarterHip,
               cp2y: bodiceLen + hipDrop * 0.72,
@@ -245,9 +267,11 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
         {
           id,
           name,
-          subtitle: useWrap
-            ? "Cortar 2 piezas (Izquierda y Derecha)"
-            : "Corpiño + Falda ensamblados",
+          subtitle: kimonoWing
+            ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoWing.underarmCurveLenCm} cm`
+            : useWrap
+              ? "Cortar 2 piezas (Izquierda y Derecha)"
+              : "Corpiño + Falda ensamblados",
           tabLabel,
           seamPath: seam,
           grainline: {
@@ -257,11 +281,31 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
             y2: totalLen - 8,
           },
           notches: [
+            ...(kimonoWing
+              ? [
+                  {
+                    x: kimonoWing.outerX,
+                    y: kimonoWing.outerDropY,
+                    angle: 0,
+                    label: "Puño Kimono",
+                  },
+                  {
+                    x: kimonoWing.joinX,
+                    y: kimonoWing.joinY,
+                    angle: 0,
+                    label: "Axila",
+                  },
+                ]
+              : []),
             {
-              x: quarterWaist,
+              x: torsoWaistX,
               y: bodiceLen,
               angle: 0,
-              label: isEmpireCut ? "Corte bajo busto" : "Cintura",
+              label: isEmpireCut
+                ? "Corte bajo busto"
+                : torsoFit === "loose"
+                  ? "Cintura holgada"
+                  : "Cintura",
             },
             { x: quarterHip, y: bodiceLen + hipDrop, angle: 0, label: "Cadera" },
             ...(useWrap
@@ -355,23 +399,28 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
       const neckDrop = isFront ? frontNeckDrop : backNeckDrop;
       const crotchExt = isFront ? frontCrotchExt : backCrotchExt;
       // Center front/back at x = 0; side seam at +x, crotch extension goes to -x
+      const upperSideJumpsuit: PathCommand[] = kimonoWing
+        ? [...kimonoWing.commands, { type: "L", x: torsoWaistX, y: bodiceLen }]
+        : [
+            { type: "L", x: shoulderX, y: shoulderSlope },
+            {
+              type: "C",
+              cp1x: shoulderX - (isFront ? 1.5 : 0.6),
+              cp1y: armholeDepth * 0.56,
+              cp2x: quarterBust * 0.85,
+              cp2y: armholeDepth,
+              x: quarterBust,
+              y: armholeDepth,
+            },
+            { type: "L", x: torsoWaistX, y: bodiceLen },
+          ];
       const seam: PathCommand[] = [
         { type: "M", x: 0, y: neckDrop },
         ...buildNecklineCommand(neckW, neckDrop, isFront ? necklineStyle : "round"),
-        { type: "L", x: shoulderX, y: shoulderSlope },
+        ...upperSideJumpsuit,
         {
           type: "C",
-          cp1x: shoulderX - (isFront ? 1.5 : 0.6),
-          cp1y: armholeDepth * 0.56,
-          cp2x: quarterBust * 0.85,
-          cp2y: armholeDepth,
-          x: quarterBust,
-          y: armholeDepth,
-        },
-        { type: "L", x: quarterWaist, y: bodiceLen },
-        {
-          type: "C",
-          cp1x: quarterWaist + (quarterHip - quarterWaist) * 0.5,
+          cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.5,
           cp1y: bodiceLen + measurements.crotchDepth * 0.4,
           cp2x: quarterHip,
           cp2y: bodiceLen + measurements.crotchDepth * 0.8,
@@ -441,7 +490,14 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
   }
 
   const subLabels: Record<DressSubStyle, string> = {
-    dress: extras?.wrapFront ? "Vestido Cruzado (Envolvente)" : "Vestido Modular",
+    dress:
+      extras?.wrapFront && isKimono
+        ? "Vestido Cruzado Kimono"
+        : extras?.wrapFront
+          ? "Vestido Cruzado (Envolvente)"
+          : isKimono
+            ? "Vestido Manga Kimono"
+            : "Vestido Modular",
     jumpsuit: "Enterizo / Mono",
   };
 
