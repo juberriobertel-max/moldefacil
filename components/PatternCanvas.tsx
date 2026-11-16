@@ -260,21 +260,27 @@ export default function PatternCanvas({
             const tx = isSinglePieceView ? 0 : piece.layoutX;
             const ty = isSinglePieceView ? 0 : piece.layoutY;
 
-            // Compute well-proportioned label size that stays strictly inside the piece
+            // Compute well-proportioned label size & rotation that stays strictly inside the piece
             const shortLabel = piece.tabLabel;
-            const maxTextWidth = Math.max(8, piece.widthCm * 0.62);
-            const fittedTitleSize = Math.min(
-              3.4,
-              Math.max(1.3, maxTextWidth / Math.max(shortLabel.length * 0.62, 4))
-            );
+            const labelAngle = piece.labelAngle ?? 0;
+            const bandW =
+              piece.labelBandWidthCm ?? Math.min(piece.widthCm, piece.heightCm);
+            const longSpan =
+              piece.labelMaxSpanCm ?? Math.max(piece.widthCm * 0.72, 8);
+            const isNarrowBand = bandW < 10;
+
+            const fittedBySpan =
+              (longSpan * 0.76) / Math.max(shortLabel.length * 0.6, 3.5);
+            const fittedByBand = bandW * (isNarrowBand ? 0.36 : 0.38);
             const finalTitleSize = Math.min(
-              fittedTitleSize,
-              Math.max(1.2, piece.heightCm * 0.38)
+              3.4,
+              Math.max(0.95, Math.min(fittedBySpan, fittedByBand))
             );
-            const subSize = Math.max(0.95, finalTitleSize * 0.56);
+            const subSize = Math.max(0.8, finalTitleSize * 0.56);
 
             const grainHeight = Math.abs(piece.grainline.y2 - piece.grainline.y1);
-            const showGrainText = grainHeight > 14 && piece.widthCm > 12;
+            const showGrainText =
+              !isNarrowBand && grainHeight > 14 && piece.widthCm > 12;
 
             return (
               <g key={piece.id} transform={`translate(${tx}, ${ty})`}>
@@ -367,47 +373,49 @@ export default function PatternCanvas({
                   </g>
                 ))}
 
-                {/* Large, Clear Piece Name centered inside piece */}
-                <text
-                  x={piece.labelPos.x}
-                  y={piece.labelPos.y}
-                  fill="#0F172A"
-                  fontSize={finalTitleSize}
-                  fontWeight="800"
-                  textAnchor="middle"
-                  dominantBaseline="central"
+                {/* Large, Clear Piece Name centered inside piece (rotated along long axis on narrow/angled pieces) */}
+                <g
+                  transform={`translate(${piece.labelPos.x}, ${piece.labelPos.y}) rotate(${labelAngle})`}
                 >
-                  {shortLabel}
-                </text>
-                {piece.heightCm > 9 && (
                   <text
-                    x={piece.labelPos.x}
-                    y={piece.labelPos.y + finalTitleSize * 1.15}
-                    fill="#475569"
-                    fontSize={subSize}
-                    fontWeight="600"
+                    x={0}
+                    y={0}
+                    fill="#0F172A"
+                    fontSize={finalTitleSize}
+                    fontWeight="800"
                     textAnchor="middle"
+                    dominantBaseline="central"
                   >
-                    {`${piece.widthCm.toFixed(0)} × ${piece.heightCm.toFixed(0)} cm`}
+                    {shortLabel}
                   </text>
-                )}
-                {piece.subtitle &&
-                  piece.subtitle.startsWith("Cortar") &&
-                  piece.heightCm > 6 && (
+                  {!isNarrowBand && piece.heightCm > 9 && (
                     <text
-                      x={piece.labelPos.x}
-                      y={
-                        piece.labelPos.y +
-                        finalTitleSize * (piece.heightCm > 9 ? 2.1 : 1.1)
-                      }
-                      fill="#0F766E"
-                      fontSize={Math.max(0.85, subSize * 0.9)}
-                      fontWeight="700"
+                      x={0}
+                      y={finalTitleSize * 1.15}
+                      fill="#475569"
+                      fontSize={subSize}
+                      fontWeight="600"
                       textAnchor="middle"
                     >
-                      {piece.subtitle}
+                      {`${piece.widthCm.toFixed(0)} × ${piece.heightCm.toFixed(0)} cm`}
                     </text>
                   )}
+                  {!isNarrowBand &&
+                    piece.subtitle &&
+                    piece.subtitle.startsWith("Cortar") &&
+                    piece.heightCm > 6 && (
+                      <text
+                        x={0}
+                        y={finalTitleSize * (piece.heightCm > 9 ? 2.1 : 1.1)}
+                        fill="#0F766E"
+                        fontSize={Math.max(0.85, subSize * 0.9)}
+                        fontWeight="700"
+                        textAnchor="middle"
+                      >
+                        {piece.subtitle}
+                      </text>
+                    )}
+                </g>
               </g>
             );
           })}

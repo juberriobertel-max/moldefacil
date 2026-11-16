@@ -516,32 +516,62 @@ export function exportPatternToPdf(options: ExportPdfOptions): {
     let labelY = py + piece.labelPos.y * mmPerCmMap;
     const pieceMapW = piece.widthCm * mmPerCmMap;
     const pieceMapH = piece.heightCm * mmPerCmMap;
-    const fontSize = Math.max(
-      4.8,
-      Math.min(7.5, pieceMapW * 0.16, pieceMapH * 0.38)
-    );
+    const bandMapMm =
+      (piece.labelBandWidthCm ?? Math.min(piece.widthCm, piece.heightCm)) *
+      mmPerCmMap;
+    const spanMapMm =
+      (piece.labelMaxSpanCm ?? Math.max(piece.widthCm, piece.heightCm)) *
+      mmPerCmMap;
+    const svgAngle = piece.labelAngle ?? 0;
+    const isAngledMini = Math.abs(svgAngle) >= 25;
+
+    const fontSize = isAngledMini
+      ? Math.max(
+          4.0,
+          Math.min(
+            6.5,
+            bandMapMm * 1.15,
+            (spanMapMm * 0.72) / Math.max(piece.tabLabel.length * 0.25, 2)
+          )
+        )
+      : Math.max(
+          4.4,
+          Math.min(7.5, pieceMapW * 0.16, pieceMapH * 0.38, bandMapMm * 1.1)
+        );
 
     // If the silhouette label falls inside a tile's corner badge box, nudge it below the badge
-    for (const tile of grid.tiles) {
-      if (tile.isEmpty) continue;
-      const bx = mapOriginX + tile.xCm * mmPerCmMap + badgeOffsetX;
-      const by = mapOriginY + tile.yCm * mmPerCmMap + badgeOffsetY;
-      if (
-        labelX >= bx - 2 &&
-        labelX <= bx + badgeW + 2 &&
-        labelY >= by - 1.5 &&
-        labelY <= by + badgeH + 2
-      ) {
-        const pieceBottomY = py + pieceMapH - 1.5;
-        if (by + badgeH + 2.6 <= pieceBottomY) {
-          labelY = by + badgeH + 2.6;
+    if (!isAngledMini) {
+      for (const tile of grid.tiles) {
+        if (tile.isEmpty) continue;
+        const bx = mapOriginX + tile.xCm * mmPerCmMap + badgeOffsetX;
+        const by = mapOriginY + tile.yCm * mmPerCmMap + badgeOffsetY;
+        if (
+          labelX >= bx - 2 &&
+          labelX <= bx + badgeW + 2 &&
+          labelY >= by - 1.5 &&
+          labelY <= by + badgeH + 2
+        ) {
+          const pieceBottomY = py + pieceMapH - 1.5;
+          if (by + badgeH + 2.6 <= pieceBottomY) {
+            labelY = by + badgeH + 2.6;
+          }
+          break;
         }
-        break;
       }
     }
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(fontSize);
+
+    if (isAngledMini) {
+      doc.setTextColor(30, 41, 59);
+      doc.text(piece.tabLabel, labelX, labelY, {
+        align: "center",
+        baseline: "middle",
+        angle: -svgAngle,
+      });
+      continue;
+    }
 
     const lines = doc.splitTextToSize(piece.tabLabel, Math.max(8, pieceMapW - 1.6));
     const lineHeightMm = fontSize * 0.38;
@@ -635,10 +665,17 @@ export function exportPatternToPdf(options: ExportPdfOptions): {
       doc.line(gx2, gy2, gx2 - 1.8, gy2 - 3);
       doc.line(gx2, gy2, gx2 + 1.8, gy2 - 3);
 
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7.5);
-      doc.setTextColor(71, 85, 105);
-      doc.text("HILO DE LA TELA", gx1 + 2.5, (gy1 + gy2) / 2);
+      const bandWCm =
+        piece.labelBandWidthCm ?? Math.min(piece.widthCm, piece.heightCm);
+      const isNarrowPiece = bandWCm < 10;
+      const grainLenMm = Math.hypot(gx2 - gx1, gy2 - gy1);
+
+      if (!isNarrowPiece && grainLenMm > 100) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.setTextColor(71, 85, 105);
+        doc.text("HILO DE LA TELA", gx1 + 2.5, (gy1 + gy2) / 2);
+      }
 
       doc.setDrawColor(220, 38, 38);
       doc.setLineWidth(0.35);
@@ -659,15 +696,33 @@ export function exportPatternToPdf(options: ExportPdfOptions): {
 
       const lx = pieceOffsetXmm + piece.labelPos.x * 10;
       const ly = pieceOffsetYmm + piece.labelPos.y * 10;
+      const svgAngle = piece.labelAngle ?? 0;
+      const pdfAngle = -svgAngle; // jsPDF positive angle is CCW, SVG is CW
+      const spanMm = (piece.labelMaxSpanCm ?? piece.widthCm) * 10;
+      const bandMm = bandWCm * 10;
+      const titleText = isNarrowPiece ? piece.tabLabel : piece.name;
+      const maxPtByBand = bandMm * 0.34 * 2.8346;
+      const maxPtBySpan =
+        ((spanMm * 0.72) / Math.max(titleText.length * 0.56, 4)) * 2.8346;
+      const titlePt = Math.min(10, Math.max(6.2, Math.min(maxPtByBand, maxPtBySpan)));
+
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
+      doc.setFontSize(titlePt);
       doc.setTextColor(15, 23, 42);
-      doc.text(piece.name, lx, ly, { align: "center" });
-      if (piece.subtitle) {
+      doc.text(titleText, lx, ly, {
+        align: "center",
+        baseline: "middle",
+        angle: pdfAngle,
+      });
+      if (!isNarrowPiece && piece.subtitle) {
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
         doc.setTextColor(71, 85, 105);
-        doc.text(piece.subtitle, lx, ly + 4.5, { align: "center" });
+        doc.text(piece.subtitle, lx, ly + 4.5, {
+          align: "center",
+          baseline: "middle",
+          angle: pdfAngle,
+        });
       }
     }
 

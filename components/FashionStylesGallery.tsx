@@ -12,9 +12,9 @@ function FashionStyleSvg({ id }: { id: string }) {
     case "wrap_dress":
       return (
         <svg viewBox="0 0 44 48" className="w-10 h-11 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
-          <path d="M14 6 L8 10 L5 18 L11 20 L13 15 L14 23 L7 42 L37 42 L30 23 L31 15 L33 20 L39 18 L36 10 L30 6" />
+          <path d="M14 6 L3 14 L5 22 C9 21, 12 20, 14 23 L7 42 L37 42 L30 23 C32 20, 35 21, 39 22 L41 14 L30 6" />
           <path d="M14 6 L28 22 L15 22 Z" opacity="0.25" fill="currentColor" stroke="none" />
-          <path d="M14 6 L28 22 M30 6 L16 20 M14 23 L30 23" />
+          <path d="M14 6 L28 22 M30 6 L16 20 M13 23 L31 23" />
         </svg>
       );
     case "empire_dress":

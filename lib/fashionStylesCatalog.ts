@@ -10,6 +10,7 @@ import {
   SleeveStyle,
   StyleVariant,
   TopSubStyle,
+  TorsoFit,
   TwoPieceBottomStyle,
   TwoPieceTopStyle,
 } from "./types";
@@ -30,6 +31,7 @@ export interface FashionStylePreset {
     twoPieceBottomStyle?: TwoPieceBottomStyle;
     necklineStyle?: NecklineStyle;
     sleeveStyle?: SleeveStyle;
+    torsoFit?: TorsoFit;
     extras: GarmentExtras;
     quickLength: QuickLengthPreset;
     styleVariant: StyleVariant;
@@ -40,19 +42,20 @@ export interface FashionStylePreset {
 export const FASHION_STYLES_CATALOG: FashionStylePreset[] = [
   {
     id: "wrap_dress",
-    name: "Vestido Cruzado (Wrap Dress)",
-    shortTag: "Escote en V • Lazo • Manga ancha",
-    fabricTip: "Queda mejor en rayón, chalis, viscosa o tela con caída fluida",
-    clipPrompt: "wrap dress with v-neck crossover front and tie waist belt",
+    name: "Vestido Cruzado Fluido / Kimono",
+    shortTag: "Frente Cruzado • Manga Kimono • Holgado • Cinturón",
+    fabricTip: "Queda mejor en rayón, chalis, viscosa o crepé fluido con caída suave",
+    clipPrompt: "loose wrap dress with v-neck crossover front, kimono batwing sleeves and waist tie belt",
     config: {
       category: "dress",
       dressSubStyle: "dress",
       skirtSubStyle: "a_line",
       necklineStyle: "v_neck",
-      sleeveStyle: "short",
+      sleeveStyle: "kimono",
+      torsoFit: "loose",
       extras: {
         wrapFront: true,
-        flaredSleeve: true,
+        flaredSleeve: false,
         waistTie: true,
         hemRuffle: false,
         sidePockets: false,
