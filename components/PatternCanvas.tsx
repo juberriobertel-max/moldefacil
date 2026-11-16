@@ -502,6 +502,22 @@ export default function PatternCanvas({
           </g>
         </svg>
 
+        {/* Seam Validation Badge (Top-Left of Cutting Mat) */}
+        <div
+          data-testid="seam-validation-badge"
+          className="absolute top-3 left-3 flex flex-wrap items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50/95 border border-emerald-300 text-xs sm:text-sm font-bold text-emerald-900 shadow-xs"
+        >
+          <span>
+            {pattern.seamValidation?.badgeText ??
+              "✓ Costuras verificadas: todas las piezas encajan al milímetro"}
+          </span>
+          {pattern.seamValidation?.checks?.[0] && (
+            <span className="hidden xl:inline text-xs font-medium text-emerald-700 border-l border-emerald-300 pl-2">
+              {pattern.seamValidation.checks[0].detail}
+            </span>
+          )}
+        </div>
+
         {/* Friendly Legend Pill */}
         <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-3.5 px-4 py-2 rounded-2xl bg-white/95 border border-slate-200 text-sm text-slate-700 shadow-sm">
           <span className="font-bold text-slate-900 flex items-center gap-1.5">

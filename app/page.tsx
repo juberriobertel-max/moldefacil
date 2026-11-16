@@ -13,13 +13,19 @@ import {
   Ruler,
   ChevronDown,
   ChevronUp,
+  BookOpen,
+  ShieldCheck,
 } from "lucide-react";
 import {
+  AccessorySubStyle,
   DEFAULT_GARMENT_EXTRAS,
   DressSubStyle,
   FabricType,
   GarmentCategory,
   GarmentExtras,
+  JumpsuitSubStyle,
+  KidsSubStyle,
+  LoungewearSubStyle,
   Measurements,
   NecklineStyle,
   PantsSubStyle,
@@ -37,6 +43,7 @@ import {
 } from "@/lib/types";
 import { generateUniversalPattern } from "@/lib/patternEngine";
 import { resolveQuickLength } from "@/lib/garmentEngines/extrasEngine";
+import { KIDS_SIZE_PRESETS } from "@/lib/garmentEngines/kidsEngine";
 import { FashionStylePreset } from "@/lib/fashionStylesCatalog";
 import { DetectedGarmentConfig } from "@/lib/browserStyleDetector";
 import {
@@ -45,6 +52,7 @@ import {
   solveTracingProportions,
 } from "@/lib/proportionSolver";
 import { computeTilingGrid, exportPatternToPdf } from "@/lib/pdfExporter";
+import { generateSewingGuide } from "@/lib/sewingGuideGenerator";
 import SmartGarmentScanner from "@/components/SmartGarmentScanner";
 import FashionStylesGallery from "@/components/FashionStylesGallery";
 import {
@@ -68,6 +76,7 @@ const DEFAULT_MEASUREMENTS: Measurements = {
   thigh: 58,
   inseam: 76,
   hemWidth: 38,
+  headCircumference: 57,
 };
 
 interface MeasurementField {
@@ -80,81 +89,107 @@ interface MeasurementField {
 
 const DYNAMIC_FIELDS: MeasurementField[] = [
   {
+    key: "headCircumference",
+    label: "Contorno de cabeza",
+    min: 48,
+    max: 64,
+    categories: ["accessories"],
+  },
+  {
     key: "bust",
-    label: "Busto",
-    min: 70,
-    max: 140,
-    categories: ["top", "dress", "two_piece"],
+    label: "Busto / Pecho",
+    min: 46,
+    max: 145,
+    categories: ["top", "dress", "two_piece", "jumpsuit", "kids", "loungewear"],
   },
   {
     key: "waist",
     label: "Cintura",
-    min: 52,
-    max: 130,
-    categories: ["top", "pants", "skirt", "dress", "two_piece"],
+    min: 44,
+    max: 135,
+    categories: [
+      "top",
+      "pants",
+      "skirt",
+      "dress",
+      "two_piece",
+      "jumpsuit",
+      "kids",
+      "loungewear",
+    ],
   },
   {
     key: "hip",
     label: "Cadera",
-    min: 76,
-    max: 150,
-    categories: ["top", "pants", "skirt", "dress", "two_piece"],
+    min: 48,
+    max: 155,
+    categories: [
+      "top",
+      "pants",
+      "skirt",
+      "dress",
+      "two_piece",
+      "jumpsuit",
+      "kids",
+      "loungewear",
+      "accessories",
+    ],
   },
   {
     key: "backWidth",
     label: "Ancho de espalda",
-    min: 28,
-    max: 52,
-    categories: ["top", "dress", "two_piece"],
+    min: 20,
+    max: 54,
+    categories: ["top", "dress", "two_piece", "jumpsuit", "kids", "loungewear"],
   },
   {
     key: "bodiceLength",
     label: "Largo de talle",
-    min: 32,
+    min: 18,
     max: 56,
-    categories: ["top", "dress", "two_piece"],
+    categories: ["top", "dress", "two_piece", "jumpsuit", "kids", "loungewear"],
   },
   {
     key: "sleeveLength",
     label: "Largo de manga",
-    min: 18,
+    min: 14,
     max: 70,
-    categories: ["top", "dress", "two_piece"],
+    categories: ["top", "dress", "two_piece", "jumpsuit", "kids", "loungewear"],
   },
   {
     key: "skirtLength",
     label: "Largo deseado",
-    min: 30,
+    min: 24,
     max: 115,
-    categories: ["skirt", "dress", "two_piece"],
+    categories: ["skirt", "dress", "two_piece", "kids"],
   },
   {
     key: "crotchDepth",
     label: "Altura de tiro",
-    min: 20,
+    min: 16,
     max: 38,
-    categories: ["pants", "dress", "two_piece"],
+    categories: ["pants", "dress", "two_piece", "jumpsuit", "kids", "loungewear"],
   },
   {
     key: "thigh",
     label: "Contorno de muslo",
-    min: 40,
+    min: 28,
     max: 85,
-    categories: ["pants", "two_piece"],
+    categories: ["pants", "two_piece", "jumpsuit", "kids", "loungewear"],
   },
   {
     key: "inseam",
     label: "Largo de pierna",
-    min: 20,
+    min: 18,
     max: 92,
-    categories: ["pants", "dress", "two_piece"],
+    categories: ["pants", "dress", "two_piece", "jumpsuit", "kids", "loungewear"],
   },
   {
     key: "hemWidth",
     label: "Ancho de bota",
-    min: 26,
+    min: 20,
     max: 70,
-    categories: ["pants", "dress", "two_piece"],
+    categories: ["pants", "dress", "two_piece", "jumpsuit", "kids"],
   },
 ];
 
@@ -171,6 +206,15 @@ export default function HomePage() {
     useState<TwoPieceTopStyle>("crop_top");
   const [twoPieceBottomStyle, setTwoPieceBottomStyle] =
     useState<TwoPieceBottomStyle>("aline_skirt");
+  const [jumpsuitSubStyle, setJumpsuitSubStyle] =
+    useState<JumpsuitSubStyle>("romper_long");
+  const [kidsSubStyle, setKidsSubStyle] =
+    useState<KidsSubStyle>("baby_bodysuit");
+  const [loungewearSubStyle, setLoungewearSubStyle] =
+    useState<LoungewearSubStyle>("leggings");
+  const [accessorySubStyle, setAccessorySubStyle] =
+    useState<AccessorySubStyle>("bucket_hat");
+
   const [necklineStyle, setNecklineStyle] = useState<NecklineStyle>("round");
   const [sleeveStyle, setSleeveStyle] = useState<SleeveStyle>("short");
   const [torsoFit, setTorsoFit] = useState<TorsoFit>("fitted");
@@ -251,6 +295,10 @@ export default function HomePage() {
         dressSubStyle,
         twoPieceTopStyle,
         twoPieceBottomStyle,
+        jumpsuitSubStyle,
+        kidsSubStyle,
+        loungewearSubStyle,
+        accessorySubStyle,
         necklineStyle,
         sleeveStyle,
         torsoFit,
@@ -270,6 +318,10 @@ export default function HomePage() {
       dressSubStyle,
       twoPieceTopStyle,
       twoPieceBottomStyle,
+      jumpsuitSubStyle,
+      kidsSubStyle,
+      loungewearSubStyle,
+      accessorySubStyle,
       necklineStyle,
       sleeveStyle,
       torsoFit,
@@ -282,6 +334,8 @@ export default function HomePage() {
       styleVariant,
     ]
   );
+
+  const sewingGuide = useMemo(() => generateSewingGuide(pattern), [pattern]);
 
   const tilingGrid = useMemo(
     () =>
@@ -300,6 +354,31 @@ export default function HomePage() {
     () =>
       DYNAMIC_FIELDS.filter((f) => {
         if (!f.categories.includes(category)) return false;
+        if (category === "accessories") {
+          if (accessorySubStyle === "bucket_hat") {
+            return f.key === "headCircumference";
+          }
+          if (accessorySubStyle === "apron") {
+            return f.key === "hip";
+          }
+          return f.key === "headCircumference";
+        }
+        if (category === "loungewear" && loungewearSubStyle === "leggings") {
+          return ["waist", "hip", "crotchDepth", "thigh", "inseam"].includes(
+            f.key
+          );
+        }
+        if (category === "kids") {
+          if (kidsSubStyle === "baby_bodysuit") {
+            return ["bust", "waist", "hip", "bodiceLength"].includes(f.key);
+          }
+          if (kidsSubStyle === "kids_dress") {
+            return ["bust", "waist", "bodiceLength", "skirtLength"].includes(
+              f.key
+            );
+          }
+          return ["waist", "hip", "crotchDepth", "inseam"].includes(f.key);
+        }
         if (
           category === "dress" &&
           dressSubStyle === "dress" &&
@@ -327,7 +406,14 @@ export default function HomePage() {
         }
         return true;
       }),
-    [category, dressSubStyle, twoPieceBottomStyle]
+    [
+      category,
+      dressSubStyle,
+      twoPieceBottomStyle,
+      loungewearSubStyle,
+      kidsSubStyle,
+      accessorySubStyle,
+    ]
   );
 
   const adjustMeasurement = (field: MeasurementField, delta: number) => {
@@ -335,10 +421,8 @@ export default function HomePage() {
       setQuickLength("photo");
     }
     setMeasurements((prev) => {
-      const next = Math.min(
-        field.max,
-        Math.max(field.min, prev[field.key] + delta)
-      );
+      const curr = prev[field.key] ?? field.min;
+      const next = Math.min(field.max, Math.max(field.min, curr + delta));
       return { ...prev, [field.key]: next };
     });
   };
@@ -357,6 +441,12 @@ export default function HomePage() {
       fabricType,
     });
   };
+
+  const showUpperBodyControls =
+    category === "top" ||
+    category === "dress" ||
+    category === "two_piece" ||
+    (category === "jumpsuit" && jumpsuitSubStyle !== "overall");
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-slate-800 overflow-x-hidden">
@@ -458,7 +548,7 @@ export default function HomePage() {
                     }`}
                   >
                     <Shirt className="h-5 w-5 shrink-0" />
-                    <span>Prenda básica</span>
+                    <span>Plantillas / Prendas</span>
                   </button>
                 </div>
 
@@ -524,6 +614,30 @@ export default function HomePage() {
                       setTwoPieceBottomStyle(bt);
                       setActiveFashionStyleId(null);
                     }}
+                    jumpsuitSubStyle={jumpsuitSubStyle}
+                    onJumpsuitSubStyleChange={(js) => {
+                      setJumpsuitSubStyle(js);
+                      setActiveFashionStyleId(null);
+                      setActivePieceId("all");
+                    }}
+                    kidsSubStyle={kidsSubStyle}
+                    onKidsSubStyleChange={(ks) => {
+                      setKidsSubStyle(ks);
+                      setActiveFashionStyleId(null);
+                      setActivePieceId("all");
+                    }}
+                    loungewearSubStyle={loungewearSubStyle}
+                    onLoungewearSubStyleChange={(lw) => {
+                      setLoungewearSubStyle(lw);
+                      setActiveFashionStyleId(null);
+                      setActivePieceId("all");
+                    }}
+                    accessorySubStyle={accessorySubStyle}
+                    onAccessorySubStyleChange={(ac) => {
+                      setAccessorySubStyle(ac);
+                      setActiveFashionStyleId(null);
+                      setActivePieceId("all");
+                    }}
                     extras={extras}
                     onExtrasChange={(next) => {
                       setExtras(next);
@@ -538,15 +652,19 @@ export default function HomePage() {
                   />
                 ) : (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-2 gap-2">
                       {(
                         [
                           { id: "two_piece", label: "Conjunto (2 Piezas)" },
-                          { id: "dress", label: "Vestido / Mono" },
+                          { id: "dress", label: "Vestido" },
                           { id: "top", label: "Blusa / Camisa" },
                           { id: "jacket", label: "Chaqueta / Blazer" },
                           { id: "skirt", label: "Falda" },
                           { id: "pants", label: "Pantalón / Short" },
+                          { id: "jumpsuit", label: "Enterizos y Overoles" },
+                          { id: "kids", label: "Infantil y Bebé" },
+                          { id: "loungewear", label: "Deportivo y Pijamas" },
+                          { id: "accessories", label: "Accesorios Textiles" },
                         ] as const
                       ).map((cat) => {
                         const isSelected =
@@ -576,7 +694,7 @@ export default function HomePage() {
                               setPins(getDefaultPinsForCategory(nextCat));
                               setPinsMoved(false);
                             }}
-                            className={`min-h-[48px] px-3 py-2.5 rounded-xl text-sm sm:text-base font-semibold border transition cursor-pointer ${
+                            className={`min-h-[48px] px-3 py-2 rounded-xl text-xs sm:text-sm font-bold border transition cursor-pointer ${
                               isSelected
                                 ? "bg-rose-600 text-white border-rose-600 shadow-sm"
                                 : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
@@ -644,7 +762,7 @@ export default function HomePage() {
                             className="w-full min-h-[48px] rounded-xl bg-[#FAF8F5] border border-slate-300 px-3 text-base text-slate-800"
                           >
                             <option value="dress">Vestido completo</option>
-                            <option value="jumpsuit">Enterizo / Mono</option>
+                            <option value="jumpsuit">Enterizo / Mono clásico</option>
                           </select>
                         )}
                         {category === "two_piece" && (
@@ -692,11 +810,181 @@ export default function HomePage() {
                             </select>
                           </div>
                         )}
+                        {category === "jumpsuit" && (
+                          <div className="grid grid-cols-1 gap-2">
+                            {(
+                              [
+                                {
+                                  id: "romper_long",
+                                  label: "Enterizo Largo (+3 cm holgura tiro)",
+                                },
+                                {
+                                  id: "romper_short",
+                                  label: "Enterizo Corto / Romper (+3 cm tiro)",
+                                },
+                                {
+                                  id: "overall",
+                                  label: "Overol / Jardinera (Pechera + Tirantes)",
+                                },
+                              ] as const
+                            ).map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => {
+                                  setJumpsuitSubStyle(opt.id);
+                                  setActivePieceId("all");
+                                }}
+                                className={`min-h-[46px] px-3 py-2 rounded-xl border-2 text-sm font-bold text-left transition cursor-pointer ${
+                                  jumpsuitSubStyle === opt.id
+                                    ? "bg-teal-600 text-white border-teal-600"
+                                    : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {category === "kids" && (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 gap-2">
+                              {(
+                                [
+                                  {
+                                    id: "baby_bodysuit",
+                                    label: "Pelele / Body de Bebé (curva pañal)",
+                                  },
+                                  {
+                                    id: "kids_dress",
+                                    label: "Vestido Infantil Evasé (1 a 10 años)",
+                                  },
+                                  {
+                                    id: "kids_pants",
+                                    label: "Pantalón Infantil con Elástico",
+                                  },
+                                ] as const
+                              ).map((opt) => (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setKidsSubStyle(opt.id);
+                                    setActivePieceId("all");
+                                  }}
+                                  className={`min-h-[46px] px-3 py-2 rounded-xl border-2 text-sm font-bold text-left transition cursor-pointer ${
+                                    kidsSubStyle === opt.id
+                                      ? "bg-teal-600 text-white border-teal-600"
+                                      : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+
+                            <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200 space-y-1.5">
+                              <span className="block text-xs font-bold text-amber-900">
+                                Tallas rápidas infantiles (1 clic):
+                              </span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {KIDS_SIZE_PRESETS.map((preset) => (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() =>
+                                      setMeasurements((prev) => ({
+                                        ...prev,
+                                        ...preset.measurements,
+                                      }))
+                                    }
+                                    className="px-2.5 py-1 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-xs font-bold text-amber-950 cursor-pointer"
+                                  >
+                                    {preset.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {category === "loungewear" && (
+                          <div className="grid grid-cols-1 gap-2">
+                            {(
+                              [
+                                {
+                                  id: "leggings",
+                                  label:
+                                    "Leggings / Licra Deportiva (1 pieza envolvente)",
+                                },
+                                {
+                                  id: "classic_pajama",
+                                  label:
+                                    "Pijama Clásica (Camisa holgada + Pantalón)",
+                                },
+                              ] as const
+                            ).map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => {
+                                  setLoungewearSubStyle(opt.id);
+                                  setActivePieceId("all");
+                                  if (opt.id === "leggings") {
+                                    setFabricType("stretch");
+                                  }
+                                }}
+                                className={`min-h-[46px] px-3 py-2 rounded-xl border-2 text-sm font-bold text-left transition cursor-pointer ${
+                                  loungewearSubStyle === opt.id
+                                    ? "bg-teal-600 text-white border-teal-600"
+                                    : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {category === "accessories" && (
+                          <div className="grid grid-cols-1 gap-2">
+                            {(
+                              [
+                                {
+                                  id: "bucket_hat",
+                                  label:
+                                    "Sombrero Pescador (Bucket Hat — 3 piezas)",
+                                },
+                                {
+                                  id: "apron",
+                                  label: "Delantal de Cocina / Taller",
+                                },
+                                {
+                                  id: "zipper_pouch",
+                                  label:
+                                    "Neceser / Cartuchera con Fuelle en Caja",
+                                },
+                              ] as const
+                            ).map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => {
+                                  setAccessorySubStyle(opt.id);
+                                  setActivePieceId("all");
+                                }}
+                                className={`min-h-[46px] px-3 py-2 rounded-xl border-2 text-sm font-bold text-left transition cursor-pointer ${
+                                  accessorySubStyle === opt.id
+                                    ? "bg-teal-600 text-white border-teal-600"
+                                    : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
-                      {(category === "top" ||
-                        category === "dress" ||
-                        category === "two_piece") && (
+                      {showUpperBodyControls && (
                         <>
                           <NecklineCollarSelector
                             heading="Cuello, Escote o Solapa"
@@ -735,19 +1023,22 @@ export default function HomePage() {
                         </>
                       )}
 
-                      {/* Largo rápido y Detalles y Extras de la Prenda */}
-                      <QuickLengthSelector
-                        quickLength={quickLength}
-                        onQuickLengthChange={setQuickLength}
-                      />
+                      {category !== "accessories" && (
+                        <>
+                          <QuickLengthSelector
+                            quickLength={quickLength}
+                            onQuickLengthChange={setQuickLength}
+                          />
 
-                      <GarmentExtrasSelector
-                        category={category}
-                        sleeveStyle={sleeveStyle}
-                        onSleeveStyleChange={setSleeveStyle}
-                        extras={extras}
-                        onExtrasChange={setExtras}
-                      />
+                          <GarmentExtrasSelector
+                            category={category}
+                            sleeveStyle={sleeveStyle}
+                            onSleeveStyleChange={setSleeveStyle}
+                            extras={extras}
+                            onExtrasChange={setExtras}
+                          />
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -771,9 +1062,11 @@ export default function HomePage() {
                     Paso 2: Pon tus medidas (en cm)
                   </h2>
                   <p className="text-sm text-slate-500">
-                    {category === "pants" || category === "skirt"
-                      ? `Cintura ${measurements.waist} • Cadera ${measurements.hip} cm`
-                      : `Busto ${measurements.bust} • Cintura ${measurements.waist} • Cadera ${measurements.hip} cm`}
+                    {category === "accessories"
+                      ? `Contorno cabeza ${measurements.headCircumference ?? 57} cm`
+                      : category === "pants" || category === "skirt" || (category === "loungewear" && loungewearSubStyle === "leggings")
+                        ? `Cintura ${measurements.waist} • Cadera ${measurements.hip} cm`
+                        : `Busto ${measurements.bust} • Cintura ${measurements.waist} • Cadera ${measurements.hip} cm`}
                   </p>
                 </div>
               </div>
@@ -786,6 +1079,23 @@ export default function HomePage() {
 
             {openStep === 2 && (
               <div className="px-5 pb-5 pt-2 border-t border-slate-100 space-y-5">
+                {/* Smart Bézier stabilization notice when disproportionate numbers are entered */}
+                {pattern.seamValidation?.stabilizedNotes &&
+                  pattern.seamValidation.stabilizedNotes.length > 0 && (
+                    <div
+                      data-testid="smart-bounds-notice"
+                      className="rounded-2xl bg-amber-50 border border-amber-200 p-3 text-xs font-medium text-amber-900 space-y-1"
+                    >
+                      <div className="font-bold flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0" />
+                        Protección automática de curvas Bézier activa:
+                      </div>
+                      {pattern.seamValidation.stabilizedNotes.map((note, idx) => (
+                        <p key={idx}>• {note}</p>
+                      ))}
+                    </div>
+                  )}
+
                 {/* Numeric Fields with Large + and - Buttons */}
                 <div className="space-y-3">
                   {visibleFields.map((field) => (
@@ -816,7 +1126,7 @@ export default function HomePage() {
                             type="number"
                             min={field.min}
                             max={field.max}
-                            value={measurements[field.key]}
+                            value={measurements[field.key] ?? field.min}
                             onChange={(e) => {
                               if (
                                 field.key === "skirtLength" ||
@@ -848,10 +1158,12 @@ export default function HomePage() {
                   ))}
                 </div>
 
-                <QuickLengthSelector
-                  quickLength={quickLength}
-                  onQuickLengthChange={setQuickLength}
-                />
+                {category !== "accessories" && (
+                  <QuickLengthSelector
+                    quickLength={quickLength}
+                    onQuickLengthChange={setQuickLength}
+                  />
+                )}
 
                 {/* Friendly Fabric Selector */}
                 <div className="space-y-2">
@@ -889,9 +1201,7 @@ export default function HomePage() {
                 </div>
 
                 {/* Waist / Torso Silhouette Selector */}
-                {(category === "top" ||
-                  category === "dress" ||
-                  category === "two_piece") && (
+                {showUpperBodyControls && (
                   <div className="space-y-2">
                     <span className="block text-base font-bold text-slate-800">
                       Ajuste de la cintura
@@ -1067,7 +1377,7 @@ export default function HomePage() {
           </div>
         </aside>
 
-        {/* RIGHT COLUMN: White Cutting Mat Canvas + Bottom Responsive Banner */}
+        {/* RIGHT COLUMN: White Cutting Mat Canvas + Sewing Guide + Bottom Responsive Banner */}
         <section className="min-w-0 lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
           <div className="flex-1 min-h-[540px]">
             <PatternCanvas
@@ -1079,6 +1389,62 @@ export default function HomePage() {
               showSheetGrid={showSheetGrid}
               onToggleSheetGrid={() => setShowSheetGrid((s) => !s)}
             />
+          </div>
+
+          {/* Dynamic Step-by-Step Sewing Guide & Fabric Recommendations */}
+          <div
+            data-testid="sewing-guide-card"
+            className="rounded-3xl bg-white border border-slate-200 p-5 shadow-xs space-y-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    {sewingGuide.title}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Nivel: {sewingGuide.difficulty} • Incluida también en tu PDF
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-slate-200">
+                <span className="block text-xs font-extrabold uppercase tracking-wide text-teal-800 mb-1">
+                  Telas recomendadas
+                </span>
+                <ul className="space-y-1 text-slate-700">
+                  {sewingGuide.recommendedFabrics.map((fab, i) => (
+                    <li key={i}>• {fab}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="p-3 rounded-2xl bg-[#FAF8F5] border border-slate-200">
+                <span className="block text-xs font-extrabold uppercase tracking-wide text-rose-800 mb-1">
+                  Insumos sugeridos
+                </span>
+                <ul className="space-y-1 text-slate-700">
+                  {sewingGuide.notions.map((not, i) => (
+                    <li key={i}>• {not}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5 text-sm text-slate-700">
+              <span className="block text-xs font-extrabold uppercase tracking-wide text-slate-600">
+                Orden de armado paso a paso
+              </span>
+              {sewingGuide.steps.map((step, i) => (
+                <p key={i} className="leading-snug">
+                  {step}
+                </p>
+              ))}
+            </div>
           </div>
 
           {/* LOCATION 1: Responsive Bottom Banner (320x50 Mobile / 728x90 Desktop) */}

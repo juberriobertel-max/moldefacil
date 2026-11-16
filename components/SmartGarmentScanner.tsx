@@ -1,10 +1,14 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { Upload, Camera, RotateCcw, Sparkles, Loader2 } from "lucide-react";
+import { Upload, Camera, RotateCcw, Sparkles, Loader2, Crop } from "lucide-react";
 import {
+  AccessorySubStyle,
   GarmentCategory,
   GarmentExtras,
+  JumpsuitSubStyle,
+  KidsSubStyle,
+  LoungewearSubStyle,
   NecklineStyle,
   PantsSubStyle,
   QuickLengthPreset,
@@ -26,6 +30,7 @@ import {
   NecklineCollarSelector,
   QuickLengthSelector,
 } from "@/components/GarmentDetailsPanel";
+import ImageCalibrator from "@/components/ImageCalibrator";
 
 interface SmartGarmentScannerProps {
   pins: TracingPins;
@@ -48,6 +53,14 @@ interface SmartGarmentScannerProps {
   onTwoPieceTopStyleChange: (style: TwoPieceTopStyle) => void;
   twoPieceBottomStyle: TwoPieceBottomStyle;
   onTwoPieceBottomStyleChange: (style: TwoPieceBottomStyle) => void;
+  jumpsuitSubStyle?: JumpsuitSubStyle;
+  onJumpsuitSubStyleChange?: (style: JumpsuitSubStyle) => void;
+  kidsSubStyle?: KidsSubStyle;
+  onKidsSubStyleChange?: (style: KidsSubStyle) => void;
+  loungewearSubStyle?: LoungewearSubStyle;
+  onLoungewearSubStyleChange?: (style: LoungewearSubStyle) => void;
+  accessorySubStyle?: AccessorySubStyle;
+  onAccessorySubStyleChange?: (style: AccessorySubStyle) => void;
   extras: GarmentExtras;
   onExtrasChange: (extras: GarmentExtras) => void;
   quickLength: QuickLengthPreset;
@@ -108,16 +121,24 @@ const TWO_PIECE_PINS: PinConfig[] = [
   { key: "hem", label: "Largo Bota/Ruedo", color: "#0D9488", num: 6, labelSide: "right" },
 ];
 
-function getPinsForCategory(cat: GarmentCategory): PinConfig[] {
+function getPinsForCategory(
+  cat: GarmentCategory,
+  loungewearSubStyle: LoungewearSubStyle = "leggings"
+): PinConfig[] {
   switch (cat) {
     case "pants":
       return PANTS_PINS;
+    case "loungewear":
+      return loungewearSubStyle === "leggings" ? PANTS_PINS : TWO_PIECE_PINS;
     case "skirt":
+    case "accessories":
       return SKIRT_PINS;
     case "top":
       return TOP_PINS;
     case "two_piece":
       return TWO_PIECE_PINS;
+    case "jumpsuit":
+    case "kids":
     case "dress":
     default:
       return DRESS_PINS;
@@ -154,7 +175,6 @@ function createSamplePhoto(
     ctx.closePath();
     ctx.fill();
   } else if (kind === "two_piece") {
-    // Crop top
     ctx.fillStyle = "#E11D48";
     ctx.beginPath();
     ctx.moveTo(145, 62);
@@ -168,7 +188,6 @@ function createSamplePhoto(
     ctx.closePath();
     ctx.fill();
 
-    // Separate A-line skirt below gap
     ctx.fillStyle = "#0F766E";
     ctx.beginPath();
     ctx.moveTo(134, 216);
@@ -223,6 +242,37 @@ function GarmentIcon({ type }: { type: GarmentCategory | "jacket" }) {
         <path d="M14 6 L6 11 L4 24 L9 25 L11 16 L11 34 L29 34 L29 16 L31 25 L36 24 L34 11 L26 6" />
         <path d="M14 6 L17 14 L14 16 L20 22 L20 34" />
         <path d="M26 6 L23 14 L26 16 L20 22" />
+      </svg>
+    );
+  }
+  if (type === "jumpsuit") {
+    return (
+      <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+        <path d="M14 5 L26 5 L29 16 L29 35 L22 35 L20 22 L18 35 L11 35 L11 16 Z" />
+        <line x1="11" y1="17" x2="29" y2="17" strokeDasharray="2 2" />
+      </svg>
+    );
+  }
+  if (type === "kids") {
+    return (
+      <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+        <path d="M15 7 C18 10, 22 10, 25 7 L32 12 L29 17 L26 15 L26 26 C26 30, 23 34, 20 34 C17 34, 14 30, 14 26 L14 15 L11 17 L8 12 Z" />
+      </svg>
+    );
+  }
+  if (type === "loungewear") {
+    return (
+      <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+        <path d="M13 6 L27 6 L28 35 L22 35 L20 16 L18 35 L12 35 Z" />
+        <line x1="13" y1="10" x2="27" y2="10" />
+      </svg>
+    );
+  }
+  if (type === "accessories") {
+    return (
+      <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+        <path d="M13 12 C15 9, 25 9, 27 12 L29 22 L11 22 Z" />
+        <path d="M5 24 C14 21, 26 21, 35 24 C27 29, 13 29, 5 24 Z" />
       </svg>
     );
   }
@@ -332,12 +382,22 @@ export default function SmartGarmentScanner({
   onTwoPieceTopStyleChange,
   twoPieceBottomStyle,
   onTwoPieceBottomStyleChange,
+  jumpsuitSubStyle = "romper_long",
+  onJumpsuitSubStyleChange,
+  kidsSubStyle = "baby_bodysuit",
+  onKidsSubStyleChange,
+  loungewearSubStyle = "leggings",
+  onLoungewearSubStyleChange,
+  accessorySubStyle = "bucket_hat",
+  onAccessorySubStyleChange,
   extras,
   onExtrasChange,
   quickLength,
   onQuickLengthChange,
   onApplyDetectedAttributes,
 }: SmartGarmentScannerProps) {
+  const [rawUploadSrc, setRawUploadSrc] = useState<string | null>(null);
+  const [isCalibratingCrop, setIsCalibratingCrop] = useState<boolean>(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [draggingPin, setDraggingPin] = useState<PinKey | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -353,7 +413,13 @@ export default function SmartGarmentScanner({
   const analysisSeqRef = useRef(0);
 
   const isTwoPiece = category === "two_piece";
-  const activePins = getPinsForCategory(category);
+  const activePins = getPinsForCategory(category, loungewearSubStyle);
+
+  const hasUpperBodyControls =
+    category === "top" ||
+    category === "dress" ||
+    category === "two_piece" ||
+    (category === "jumpsuit" && jumpsuitSubStyle !== "overall");
 
   const detectedBadges = (() => {
     const badges: string[] = [];
@@ -363,10 +429,14 @@ export default function SmartGarmentScanner({
       top: topSubStyle === "jacket" ? "Chaqueta / Blazer" : "Blusa / Camisa",
       skirt: "Falda",
       pants: "Pantalón",
+      jumpsuit: "Enterizo / Overol",
+      kids: "Ropa Infantil / Bebé",
+      loungewear: "Deportivo / Pijama",
+      accessories: "Accesorios",
     };
     badges.push(catLabels[category]);
 
-    if (category === "dress" || category === "top" || category === "two_piece") {
+    if (hasUpperBodyControls) {
       if (extras.wrapFront) {
         badges.push("Frente Cruzado");
       } else {
@@ -428,8 +498,9 @@ export default function SmartGarmentScanner({
     reader.onload = (e) => {
       if (typeof e.target?.result === "string") {
         const resultUrl = e.target.result;
-        setImageSrc(resultUrl);
-        void runStyleDetection(resultUrl);
+        // Open ImageCalibrator first so the user can crop/frame before analysis
+        setRawUploadSrc(resultUrl);
+        setIsCalibratingCrop(true);
       }
     };
     reader.readAsDataURL(file);
@@ -449,8 +520,22 @@ export default function SmartGarmentScanner({
 
   return (
     <div className="space-y-5">
-      {/* 1. CLEAN PHOTO REFERENCE + 5 OR 6 DRAGGABLE PINS */}
-      {!imageSrc ? (
+      {/* 1. QUICK IMAGE CALIBRATOR (CROP/FRAMING BEFORE DETECTOR & PINS) */}
+      {isCalibratingCrop && rawUploadSrc ? (
+        <ImageCalibrator
+          rawImageSrc={rawUploadSrc}
+          onConfirmCrop={(croppedUrl) => {
+            setIsCalibratingCrop(false);
+            setImageSrc(croppedUrl);
+            void runStyleDetection(croppedUrl);
+          }}
+          onUseFullImage={() => {
+            setIsCalibratingCrop(false);
+            setImageSrc(rawUploadSrc);
+            void runStyleDetection(rawUploadSrc);
+          }}
+        />
+      ) : !imageSrc ? (
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -473,10 +558,10 @@ export default function SmartGarmentScanner({
             <Camera className="h-6 w-6" />
           </div>
           <p className="text-base font-bold text-slate-800">
-            Sube una foto limpia de tu prenda
+            Sube una foto o captura de tu prenda
           </p>
           <p className="text-sm text-slate-500 mt-1 mb-4">
-            Mueve los círculos sobre la foto para copiar su largo y escote
+            Podrás recortar bordes de captura antes de analizar y mover los pines
           </p>
 
           <button
@@ -495,7 +580,9 @@ export default function SmartGarmentScanner({
             <button
               type="button"
               onClick={() => {
-                setImageSrc(createSamplePhoto("two_piece"));
+                const sample = createSamplePhoto("two_piece");
+                setRawUploadSrc(sample);
+                setImageSrc(sample);
                 onCategoryChange("two_piece");
               }}
               className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 border border-slate-200 shadow-2xs cursor-pointer"
@@ -505,7 +592,9 @@ export default function SmartGarmentScanner({
             <button
               type="button"
               onClick={() => {
-                setImageSrc(createSamplePhoto("dress"));
+                const sample = createSamplePhoto("dress");
+                setRawUploadSrc(sample);
+                setImageSrc(sample);
                 onCategoryChange("dress");
               }}
               className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 border border-slate-200 shadow-2xs cursor-pointer"
@@ -515,7 +604,9 @@ export default function SmartGarmentScanner({
             <button
               type="button"
               onClick={() => {
-                setImageSrc(createSamplePhoto("pants"));
+                const sample = createSamplePhoto("pants");
+                setRawUploadSrc(sample);
+                setImageSrc(sample);
                 onCategoryChange("pants");
               }}
               className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 border border-slate-200 shadow-2xs cursor-pointer"
@@ -525,7 +616,9 @@ export default function SmartGarmentScanner({
             <button
               type="button"
               onClick={() => {
-                setImageSrc(createSamplePhoto("blouse"));
+                const sample = createSamplePhoto("blouse");
+                setRawUploadSrc(sample);
+                setImageSrc(sample);
                 onCategoryChange("top");
               }}
               className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 border border-slate-200 shadow-2xs cursor-pointer"
@@ -547,7 +640,6 @@ export default function SmartGarmentScanner({
         </div>
       ) : (
         <div className="space-y-3">
-          {/* Discreet multi-attribute zero-shot browser analysis status */}
           {detectionState.status === "analyzing" && (
             <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-900 flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
@@ -572,30 +664,46 @@ export default function SmartGarmentScanner({
           <div className="rounded-xl bg-teal-50 border border-teal-200 p-3 text-sm text-teal-900 leading-snug">
             {isTwoPiece
               ? "Modo 2 Piezas: marca hasta dónde llega el Top (3) y dónde empieza la Falda o Pantalón (4)."
-              : category === "pants"
-                ? "Modo Pantalón: ubica Cintura (1), Cadera (2), Tiro/Entrepierna (3) y Largo Bota (4)."
-                : category === "skirt"
-                  ? "Modo Falda: ubica Cintura (1), Cadera (2) y Largo Ruedo (3)."
+              : category === "pants" || (category === "loungewear" && loungewearSubStyle === "leggings")
+                ? "Modo Pantalón / Leggings: ubica Cintura (1), Cadera (2), Tiro/Entrepierna (3) y Largo Bota (4)."
+                : category === "skirt" || category === "accessories"
+                  ? "Modo Falda / Accesorio: ubica Borde Superior (1), Ancho Medio (2) y Largo Final (3)."
                   : category === "top"
                     ? "Modo Parte Superior: ubica Hombro (1), Cuello (2), Sisa (3) y Largo (4)."
                     : "Mueve los 5 círculos sobre tu foto. El molde de la derecha cambiará al instante."}
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={() => onPinsChange(getDefaultPinsForCategory(category))}
-              className="text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-slate-200 cursor-pointer"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Centrar puntos
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onPinsChange(getDefaultPinsForCategory(category))}
+                className="text-xs sm:text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-slate-200 cursor-pointer"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Centrar puntos
+              </button>
+              <button
+                type="button"
+                data-testid="open-crop-btn"
+                onClick={() => {
+                  if (!rawUploadSrc) setRawUploadSrc(imageSrc);
+                  setIsCalibratingCrop(true);
+                }}
+                className="text-xs sm:text-sm font-semibold text-teal-700 hover:text-teal-900 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-50 border border-teal-200 cursor-pointer"
+              >
+                <Crop className="h-3.5 w-3.5" />
+                Encuadrar foto
+              </button>
+            </div>
             <button
               type="button"
               onClick={() => {
                 analysisSeqRef.current += 1;
                 setDetectionState({ status: "idle" });
                 setImageSrc(null);
+                setRawUploadSrc(null);
+                setIsCalibratingCrop(false);
               }}
               className="text-sm font-semibold text-rose-600 hover:text-rose-700 underline underline-offset-2 cursor-pointer"
             >
@@ -631,7 +739,6 @@ export default function SmartGarmentScanner({
               >
                 {isTwoPiece ? (
                   <>
-                    {/* Top piece lines (unjoined from bottom) */}
                     <polyline
                       fill="none"
                       stroke="rgba(225, 29, 72, 0.7)"
@@ -644,7 +751,6 @@ export default function SmartGarmentScanner({
                         )
                         .join(" ")}
                     />
-                    {/* Bottom piece lines */}
                     <polyline
                       fill="none"
                       stroke="rgba(13, 148, 136, 0.75)"
@@ -680,9 +786,9 @@ export default function SmartGarmentScanner({
                 const isActive = draggingPin === meta.key;
                 let placeLeft: boolean;
                 if (p.x < 0.25) {
-                  placeLeft = false; // cerca del borde izquierdo -> etiqueta a la derecha
+                  placeLeft = false;
                 } else if (p.x > 0.75) {
-                  placeLeft = true; // cerca del borde derecho -> etiqueta a la izquierda
+                  placeLeft = true;
                 } else {
                   placeLeft = meta.labelSide === "left" || p.x > 0.62;
                 }
@@ -724,7 +830,6 @@ export default function SmartGarmentScanner({
             </div>
           </div>
 
-          {/* Editable Multi-Attribute Detection Summary Card */}
           {detectionState.status === "detected" && (
             <div
               data-testid="detected-attributes-card"
@@ -755,13 +860,13 @@ export default function SmartGarmentScanner({
       {/* 2. VISUAL PART BUILDER WITH SCHEMATIC SVG DRAWINGS */}
       <div className="pt-2 border-t border-slate-200 space-y-4">
         <h3 className="text-base font-extrabold text-slate-900">
-          ¿Cómo es la prenda de la foto?
+          ¿Qué prenda quieres trazar?
         </h3>
 
-        {/* Prenda (including Conjunto 2 Piezas y Chaqueta / Blazer) */}
+        {/* Categorías completas (incluyendo Enterizos, Infantil, Deportivo/Pijamas y Accesorios) */}
         <div className="space-y-1.5">
           <span className="block text-sm font-bold text-slate-700">
-            1. Tipo de prenda
+            1. Categoría de prenda
           </span>
           <div className="grid grid-cols-2 gap-2">
             {(
@@ -772,6 +877,10 @@ export default function SmartGarmentScanner({
                 { id: "jacket", label: "Chaqueta / Blazer" },
                 { id: "skirt", label: "Falda" },
                 { id: "pants", label: "Pantalón" },
+                { id: "jumpsuit", label: "Enterizos y Overoles" },
+                { id: "kids", label: "Infantil y Bebé" },
+                { id: "loungewear", label: "Deportivo y Pijamas" },
+                { id: "accessories", label: "Accesorios Textiles" },
               ] as const
             ).map((item) => {
               const isSelected =
@@ -799,16 +908,14 @@ export default function SmartGarmentScanner({
                       onCategoryChange(item.id);
                     }
                   }}
-                  className={`min-h-[60px] p-2.5 rounded-2xl border-2 flex items-center gap-2 text-left transition cursor-pointer ${
-                    item.id === "two_piece" || item.id === "dress" ? "" : ""
-                  } ${
+                  className={`min-h-[58px] p-2.5 rounded-2xl border-2 flex items-center gap-2 text-left transition cursor-pointer ${
                     isSelected
                       ? "bg-rose-50 border-rose-600 text-rose-900 shadow-2xs"
                       : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
                   }`}
                 >
                   <GarmentIcon type={item.id} />
-                  <span className="text-sm font-bold leading-tight">
+                  <span className="text-xs sm:text-sm font-bold leading-tight">
                     {item.label}
                   </span>
                 </button>
@@ -817,7 +924,7 @@ export default function SmartGarmentScanner({
           </div>
         </div>
 
-        {/* Sub-selectores rápidos para Conjunto (2 Piezas) */}
+        {/* Sub-selectores para Conjunto (2 Piezas) */}
         {category === "two_piece" && (
           <div className="space-y-3 p-3.5 rounded-2xl bg-[#FAF8F5] border border-slate-200">
             <div className="space-y-1.5">
@@ -886,10 +993,131 @@ export default function SmartGarmentScanner({
           </div>
         )}
 
-        {/* Cuello, Escote o Solapa (oculto en Pantalón y Falda) */}
-        {(category === "top" ||
-          category === "dress" ||
-          category === "two_piece") && (
+        {/* Sub-selector Enterizos y Overoles */}
+        {category === "jumpsuit" && onJumpsuitSubStyleChange && (
+          <div className="space-y-1.5">
+            <span className="block text-sm font-bold text-slate-700">
+              2. Modelo de Enterizo / Overol
+            </span>
+            <div className="grid grid-cols-1 gap-2">
+              {(
+                [
+                  { id: "romper_long", label: "Enterizo Largo (+3 cm holgura tiro)" },
+                  { id: "romper_short", label: "Enterizo Corto / Romper (+3 cm tiro)" },
+                  { id: "overall", label: "Overol / Jardinera (Pechera + Tirantes)" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onJumpsuitSubStyleChange(opt.id)}
+                  className={`min-h-[48px] px-3 py-2 rounded-xl border-2 text-sm font-bold text-left transition cursor-pointer ${
+                    jumpsuitSubStyle === opt.id
+                      ? "bg-teal-600 text-white border-teal-600"
+                      : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sub-selector Infantil y Bebé */}
+        {category === "kids" && onKidsSubStyleChange && (
+          <div className="space-y-1.5">
+            <span className="block text-sm font-bold text-slate-700">
+              2. Prenda Infantil / Bebé
+            </span>
+            <div className="grid grid-cols-1 gap-2">
+              {(
+                [
+                  { id: "baby_bodysuit", label: "Pelele / Body de Bebé (curva pañal y broches)" },
+                  { id: "kids_dress", label: "Vestido Infantil Evasé (1 a 10 años)" },
+                  { id: "kids_pants", label: "Pantalón Infantil con Elástico" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onKidsSubStyleChange(opt.id)}
+                  className={`min-h-[48px] px-3 py-2 rounded-xl border-2 text-sm font-bold text-left transition cursor-pointer ${
+                    kidsSubStyle === opt.id
+                      ? "bg-teal-600 text-white border-teal-600"
+                      : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sub-selector Deportivo y Pijamas */}
+        {category === "loungewear" && onLoungewearSubStyleChange && (
+          <div className="space-y-1.5">
+            <span className="block text-sm font-bold text-slate-700">
+              2. Modelo Deportivo / Pijama
+            </span>
+            <div className="grid grid-cols-1 gap-2">
+              {(
+                [
+                  { id: "leggings", label: "Leggings / Licra Deportiva (1 pieza envolvente)" },
+                  { id: "classic_pajama", label: "Pijama Clásica (Camisa holgada + Pantalón)" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onLoungewearSubStyleChange(opt.id)}
+                  className={`min-h-[48px] px-3 py-2 rounded-xl border-2 text-sm font-bold text-left transition cursor-pointer ${
+                    loungewearSubStyle === opt.id
+                      ? "bg-teal-600 text-white border-teal-600"
+                      : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sub-selector Accesorios Textiles */}
+        {category === "accessories" && onAccessorySubStyleChange && (
+          <div className="space-y-1.5">
+            <span className="block text-sm font-bold text-slate-700">
+              2. Tipo de Accesorio Textil
+            </span>
+            <div className="grid grid-cols-1 gap-2">
+              {(
+                [
+                  { id: "bucket_hat", label: "Sombrero Pescador (Bucket Hat — 3 piezas)" },
+                  { id: "apron", label: "Delantal de Cocina / Taller" },
+                  { id: "zipper_pouch", label: "Neceser / Cartuchera con Fuelle en Caja" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onAccessorySubStyleChange(opt.id)}
+                  className={`min-h-[48px] px-3 py-2 rounded-xl border-2 text-sm font-bold text-left transition cursor-pointer ${
+                    accessorySubStyle === opt.id
+                      ? "bg-teal-600 text-white border-teal-600"
+                      : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Cuello, Escote o Solapa */}
+        {hasUpperBodyControls && (
           <NecklineCollarSelector
             heading="2. Cuello, Escote o Solapa"
             necklineStyle={necklineStyle}
@@ -897,10 +1125,8 @@ export default function SmartGarmentScanner({
           />
         )}
 
-        {/* Mangas (Blusa, Vestido, Conjunto) */}
-        {(category === "top" ||
-          category === "dress" ||
-          category === "two_piece") && (
+        {/* Mangas */}
+        {hasUpperBodyControls && (
           <div className="space-y-3">
             <div className="space-y-1.5">
               <span className="block text-sm font-bold text-slate-700">
@@ -1033,20 +1259,22 @@ export default function SmartGarmentScanner({
           </div>
         )}
 
-        {/* Largo real de la prenda (para fotos cortadas) */}
-        <QuickLengthSelector
-          quickLength={quickLength}
-          onQuickLengthChange={onQuickLengthChange}
-        />
+        {category !== "accessories" && (
+          <>
+            <QuickLengthSelector
+              quickLength={quickLength}
+              onQuickLengthChange={onQuickLengthChange}
+            />
 
-        {/* Detalles y Extras de la Prenda (selección múltiple) */}
-        <GarmentExtrasSelector
-          category={category}
-          sleeveStyle={sleeveStyle}
-          onSleeveStyleChange={onSleeveStyleChange}
-          extras={extras}
-          onExtrasChange={onExtrasChange}
-        />
+            <GarmentExtrasSelector
+              category={category}
+              sleeveStyle={sleeveStyle}
+              onSleeveStyleChange={onSleeveStyleChange}
+              extras={extras}
+              onExtrasChange={onExtrasChange}
+            />
+          </>
+        )}
       </div>
     </div>
   );

@@ -10,6 +10,7 @@ import {
   SeamAllowance,
 } from "./types";
 import { flattenPathToPoints } from "./garmentEngines/geometry";
+import { generateSewingGuide } from "./sewingGuideGenerator";
 
 export const PAPER_DIMENSIONS_MM: Record<
   PaperFormat,
@@ -826,10 +827,18 @@ export function exportPatternToPdf(options: ExportPdfOptions): {
     ["Contorno de Cadera", `${measurements.hip} cm`],
   ];
 
+  if (pattern.category === "accessories") {
+    rowsData.unshift([
+      "Contorno de Cabeza",
+      `${measurements.headCircumference ?? 57} cm`,
+    ]);
+  }
   if (
     pattern.category === "top" ||
     pattern.category === "dress" ||
-    pattern.category === "two_piece"
+    pattern.category === "two_piece" ||
+    pattern.category === "jumpsuit" ||
+    pattern.category === "kids"
   ) {
     rowsData.unshift(["Contorno de Busto / Pecho", `${measurements.bust} cm`]);
     rowsData.push(
@@ -909,7 +918,33 @@ export function exportPatternToPdf(options: ExportPdfOptions): {
       18,
       tableY
     );
-    tableY += 6;
+    tableY += 5.5;
+  }
+
+  const guide = generateSewingGuide(pattern);
+  if (tableY < paper.height - 45) {
+    tableY += 4;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+    doc.text("Guía Rápida de Confección y Telas Sugeridas", 15, tableY);
+    tableY += 5.5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(51, 65, 85);
+    const fabricLine = doc.splitTextToSize(
+      `Telas recomendadas: ${guide.recommendedFabrics.join(" • ")}`,
+      paper.width - 32
+    );
+    doc.text(fabricLine, 18, tableY);
+    tableY += fabricLine.length * 4.2 + 2;
+
+    for (const stepText of guide.steps) {
+      if (tableY > paper.height - 16) break;
+      const wrappedStep = doc.splitTextToSize(stepText, paper.width - 32);
+      doc.text(wrappedStep, 18, tableY);
+      tableY += wrappedStep.length * 4.0 + 1.2;
+    }
   }
 
   const filename = `moldefacil-${pattern.category}-${paperFormat}.pdf`;
