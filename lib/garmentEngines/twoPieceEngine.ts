@@ -5,6 +5,7 @@ import {
   NecklineStyle,
   PantsSubStyle,
   PathCommand,
+  PatternInternalLine,
   PatternPiece,
   PatternResult,
   SeamAllowance,
@@ -25,12 +26,18 @@ import {
 import { generateSkirtPattern } from "./skirtEngine";
 import { generatePantsPattern } from "./pantsEngine";
 import {
+  buildFlapPocketPieces,
   buildKimonoWingSegment,
+  buildShirtDressDetailPieces,
   buildSleevePiece,
+  buildTailoredCollarAndFacingPieces,
+  buildTailoredLapelFrontGeometry,
+  buildVerticalWaistDart,
   buildWaistbandPiece,
   buildWaistTiePiece,
   buildWrapFacingPiece,
   computeTorsoWaistHalfWidth,
+  createFlapPocketMarkLine,
 } from "./extrasEngine";
 
 export interface TwoPieceEngineInput {
@@ -70,7 +77,19 @@ export function generateTwoPiecePattern(
     extras,
   } = input;
 
-  const { easeFactor, flatEase, label } = computeEase(fabricType, 0, torsoFit);
+  const isJacketTop = topStyle === "jacket_blazer";
+  const isTailoredTop = isJacketTop || necklineStyle === "tailored_lapel";
+  const isWrapFront = Boolean(extras?.wrapFront);
+  const useTailoredLapel =
+    isTailoredTop && !isWrapFront && necklineStyle !== "shirt_collar";
+  const useShirtCollar =
+    !isWrapFront && !useTailoredLapel && necklineStyle === "shirt_collar";
+
+  const { easeFactor, flatEase, label } = computeEase(
+    fabricType,
+    isJacketTop ? 4 : isTailoredTop ? 2 : 0,
+    torsoFit
+  );
 
   const effBust = measurements.bust * easeFactor + flatEase;
   const effWaist = measurements.waist * easeFactor + flatEase;
@@ -82,9 +101,14 @@ export function generateTwoPiecePattern(
   const quarterHip = effHip / 4;
   const halfBack = effBack / 2;
 
-  // Separate top length (crop top vs waist blouse) + 2 cm bottom hem allowance
-  const baseTopRatio = topStyle === "crop_top" ? 0.72 : 1.0;
+  // Separate top length (crop top, waist blouse, or blazer/jacket) + 2 cm hem allowance
+  const baseTopRatio =
+    topStyle === "crop_top" ? 0.72 : isJacketTop ? 1.28 : 1.0;
   const bottomHemAllowance = 2.0;
+  const bodiceRefY = Math.max(
+    24,
+    measurements.bodiceLength * (topStyle === "crop_top" ? 0.72 : 1.0) * topLengthMultiplier
+  );
   const topBodyLen =
     Math.max(24, measurements.bodiceLength * baseTopRatio * topLengthMultiplier) +
     bottomHemAllowance;
@@ -92,8 +116,10 @@ export function generateTwoPiecePattern(
   const fittedBottomHalfW =
     topStyle === "crop_top"
       ? quarterWaist + (quarterBust - quarterWaist) * 0.35
-      : quarterWaist + 1;
-  const topBottomHalfW =
+      : isJacketTop
+        ? Math.max(quarterWaist + 2.5, quarterHip * 0.94)
+        : quarterWaist + 1;
+  const baseTopBottomHalfW =
     torsoFit === "loose"
       ? computeTorsoWaistHalfWidth({
           quarterBust,
@@ -102,15 +128,19 @@ export function generateTwoPiecePattern(
           torsoFit: "loose",
         })
       : fittedBottomHalfW;
+  const topBottomHalfW =
+    isTailoredTop && torsoFit === "fitted"
+      ? baseTopBottomHalfW + 2.6
+      : baseTopBottomHalfW;
 
   const isKimono = sleeveStyle === "kimono";
   const neckW = Math.max(6.2, effBust * 0.075);
   const baseNeckDrop =
-    necklineStyle === "v_neck"
+    necklineStyle === "v_neck" || necklineStyle === "tailored_lapel"
       ? 14
       : necklineStyle === "square"
         ? 10.5
-        : necklineStyle === "high"
+        : necklineStyle === "high" || necklineStyle === "shirt_collar"
           ? 4.2
           : 9;
   const frontNeckDrop = necklineDropRatio
@@ -152,7 +182,6 @@ export function generateTwoPiecePattern(
 
   const pieces: PatternPiece[] = [];
 
-  const isWrapFront = Boolean(extras?.wrapFront);
   const wrapOverlap = Math.round(quarterWaist * 0.58);
 
   const frontUpperCommands: PathCommand[] = kimonoWing
@@ -171,7 +200,46 @@ export function generateTwoPiecePattern(
         { type: "L", x: topBottomHalfW, y: topBodyLen },
       ];
 
-  // 1. TOP DELANTERO (simétrico o Frente Cruzado)
+  const dartWaistY = Math.min(topBodyLen - 4, Math.max(armholeDepth + 6, bodiceRefY));
+  const dartBotY = Math.min(topBodyLen - 2, dartWaistY + 10);
+  const dartTopY = Math.min(dartWaistY - 3, armholeDepth + 3.5);
+
+  const lapelGeom = useTailoredLapel
+    ? buildTailoredLapelFrontGeometry({
+        neckW,
+        frontNeckDrop,
+        armholeDepth,
+        bodiceLen: dartWaistY,
+        totalLen: topBodyLen,
+      })
+    : null;
+
+  const frontInternalLines: PatternInternalLine[] = [
+    ...(lapelGeom ? lapelGeom.internalLines : []),
+    ...(isTailoredTop && dartBotY - dartTopY >= 6
+      ? [
+          buildVerticalWaistDart({
+            centerX: Math.max(6.5, quarterBust * 0.48),
+            topY: dartTopY,
+            waistY: dartWaistY,
+            botY: dartBotY,
+            halfWidthCm: 1.35,
+            label: "Pinza de entalle",
+          }),
+        ]
+      : []),
+    ...(extras?.flapPockets
+      ? [
+          createFlapPocketMarkLine({
+            xStart: Math.max(3.5, quarterWaist * 0.22),
+            yTop: Math.max(dartWaistY, topBodyLen - 11),
+            widthCm: Math.min(13.5, Math.max(10, topBottomHalfW * 0.52)),
+          }),
+        ]
+      : []),
+  ];
+
+  // 1. TOP DELANTERO (simétrico, Frente Cruzado o Chaqueta/Solapa Sastre)
   const topFrontSeam: PathCommand[] = isWrapFront
     ? [
         { type: "M", x: neckW, y: 0 },
@@ -188,13 +256,20 @@ export function generateTwoPiecePattern(
         },
         { type: "Z" },
       ]
-    : [
-        { type: "M", x: 0, y: frontNeckDrop },
-        ...buildNecklineCommand(neckW, frontNeckDrop, necklineStyle),
-        ...frontUpperCommands,
-        { type: "L", x: 0, y: topBodyLen },
-        { type: "Z" },
-      ];
+    : lapelGeom
+      ? [
+          { type: "M", x: neckW, y: 0 },
+          ...frontUpperCommands,
+          ...lapelGeom.closingCommands,
+          { type: "Z" },
+        ]
+      : [
+          { type: "M", x: 0, y: frontNeckDrop },
+          ...buildNecklineCommand(neckW, frontNeckDrop, necklineStyle),
+          ...frontUpperCommands,
+          { type: "L", x: 0, y: topBodyLen },
+          { type: "Z" },
+        ];
 
   pieces.push(
     normalizePiece(
@@ -202,13 +277,25 @@ export function generateTwoPiecePattern(
         id: "top_front",
         name: isWrapFront
           ? "TOP DELANTERO CRUZADO (x2)"
-          : "TOP DELANTERO (x1 doblez)",
+          : useTailoredLapel
+            ? "BLAZER DELANTERO (x2)"
+            : isJacketTop || useShirtCollar
+              ? "CHAQUETA DELANTERO (x2)"
+              : "TOP DELANTERO (x1 doblez)",
         subtitle: kimonoWing
           ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoWing.underarmCurveLenCm} cm`
           : isWrapFront
             ? "Cortar 2 piezas (Izquierda y Derecha)"
-            : "Incluye 2 cm dobladillo",
-        tabLabel: isWrapFront ? "Top Cruzado" : "Top Delantero",
+            : useTailoredLapel
+              ? "Con cruce, solapa y pinza | Cortar 2 piezas"
+              : "Incluye 2 cm dobladillo",
+        tabLabel: isWrapFront
+          ? "Top Cruzado"
+          : useTailoredLapel
+            ? "Blazer Delantero"
+            : isJacketTop
+              ? "Chaqueta Del."
+              : "Top Delantero",
         seamPath: topFrontSeam,
         grainline: {
           x1: Math.max(4, topBottomHalfW * 0.45),
@@ -239,6 +326,7 @@ export function generateTwoPiecePattern(
             angle: 0,
             label: "Dobladillo",
           },
+          ...(lapelGeom ? lapelGeom.notches : []),
           ...(isWrapFront
             ? [
                 {
@@ -256,10 +344,12 @@ export function generateTwoPiecePattern(
               ]
             : []),
         ],
+        internalLines: frontInternalLines.length > 0 ? frontInternalLines : undefined,
         labelPos: { x: topBottomHalfW * 0.5, y: topBodyLen * 0.65 },
-        foldLine: isWrapFront
-          ? undefined
-          : { x1: 0, y1: frontNeckDrop, x2: 0, y2: topBodyLen },
+        foldLine:
+          isWrapFront || useTailoredLapel || isJacketTop || useShirtCollar
+            ? undefined
+            : { x1: 0, y1: frontNeckDrop, x2: 0, y2: topBodyLen },
       },
       seamAllowance
     )
@@ -339,6 +429,19 @@ export function generateTwoPiecePattern(
           { x: topBottomHalfW, y: topBodyLen - bottomHemAllowance, angle: 0, label: "Dobladillo" },
         ],
         labelPos: { x: topBottomHalfW * 0.5, y: topBodyLen * 0.65 },
+        internalLines:
+          isTailoredTop && dartBotY - dartTopY >= 6
+            ? [
+                buildVerticalWaistDart({
+                  centerX: Math.max(6.0, quarterBust * 0.44),
+                  topY: dartTopY,
+                  waistY: dartWaistY,
+                  botY: dartBotY,
+                  halfWidthCm: 1.35,
+                  label: "Pinza espalda",
+                }),
+              ]
+            : undefined,
         foldLine: { x1: 0, y1: backNeckDrop, x2: 0, y2: topBodyLen },
       },
       seamAllowance
@@ -358,6 +461,33 @@ export function generateTwoPiecePattern(
     pieces.push(sleevePiece);
   }
 
+  if (useTailoredLapel) {
+    pieces.push(
+      ...buildTailoredCollarAndFacingPieces({
+        neckW,
+        shoulderX,
+        shoulderSlope,
+        frontNeckDrop,
+        armholeDepth,
+        bodiceLen: dartWaistY,
+        totalLen: topBodyLen,
+        seamAllowance,
+      })
+    );
+  } else if (useShirtCollar) {
+    pieces.push(
+      ...buildShirtDressDetailPieces({
+        neckW,
+        frontLengthCm: topBodyLen - frontNeckDrop,
+        seamAllowance,
+      })
+    );
+  }
+
+  if (extras?.flapPockets) {
+    pieces.push(...buildFlapPocketPieces(seamAllowance));
+  }
+
   // 4. BOTTOM PIECES (Falda/Pantalón + Bolero/Bolsillos si aplica)
   const bottomExtras: GarmentExtras | undefined = extras
     ? {
@@ -366,6 +496,7 @@ export function generateTwoPiecePattern(
         waistTie: false,
         hemRuffle: extras.hemRuffle,
         sidePockets: extras.sidePockets,
+        flapPockets: false,
       }
     : undefined;
 
@@ -445,7 +576,12 @@ export function generateTwoPiecePattern(
   // 5. PRETINA (Waistband shared builder)
   pieces.push(buildWaistbandPiece(effWaist, seamAllowance));
 
-  const topText = topStyle === "crop_top" ? "Crop Top" : "Blusa";
+  const topText =
+    topStyle === "crop_top"
+      ? "Crop Top"
+      : topStyle === "jacket_blazer"
+        ? "Chaqueta / Blazer"
+        : "Blusa";
   const bottomTextMap: Record<TwoPieceBottomStyle, string> = {
     straight_skirt: "Falda Recta",
     aline_skirt: "Falda en A",

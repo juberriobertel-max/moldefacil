@@ -253,6 +253,13 @@ export function normalizePiece(
       x: n.x + shiftX,
       y: n.y + shiftY,
     })),
+    internalLines: rawPiece.internalLines?.map((line) => ({
+      ...line,
+      commands: translateCommands(line.commands, shiftX, shiftY),
+      labelPos: line.labelPos
+        ? { x: line.labelPos.x + shiftX, y: line.labelPos.y + shiftY }
+        : undefined,
+    })),
     labelPos: {
       x: rawPiece.labelPos.x + shiftX,
       y: rawPiece.labelPos.y + shiftY,
@@ -389,7 +396,7 @@ export function buildNecklineCommand(
       { type: "L", x: neckWidth, y: 0 },
     ];
   }
-  if (style === "high") {
+  if (style === "high" || style === "shirt_collar") {
     const shallowDrop = Math.min(neckDrop, 4.2);
     return [
       {
@@ -403,7 +410,7 @@ export function buildNecklineCommand(
       },
     ];
   }
-  if (style === "v_neck") {
+  if (style === "v_neck" || style === "tailored_lapel") {
     return [
       {
         type: "C",

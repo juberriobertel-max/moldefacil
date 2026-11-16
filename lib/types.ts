@@ -9,14 +9,20 @@ export type PantsSubStyle = "straight" | "wide" | "shorts";
 export type SkirtSubStyle = "straight" | "a_line" | "semicircular";
 export type DressSubStyle = "dress" | "jumpsuit";
 
-export type TwoPieceTopStyle = "crop_top" | "waist_blouse";
+export type TwoPieceTopStyle = "crop_top" | "waist_blouse" | "jacket_blazer";
 export type TwoPieceBottomStyle =
   | "straight_skirt"
   | "aline_skirt"
   | "long_skirt"
   | "pants";
 
-export type NecklineStyle = "round" | "v_neck" | "square" | "high";
+export type NecklineStyle =
+  | "round"
+  | "v_neck"
+  | "square"
+  | "high"
+  | "tailored_lapel"
+  | "shirt_collar";
 export type SleeveStyle = "sleeveless" | "short" | "long" | "kimono";
 export type TorsoFit = "fitted" | "loose";
 
@@ -62,6 +68,13 @@ export interface PatternNotch {
   label?: string;
 }
 
+export interface PatternInternalLine {
+  commands: PathCommand[];
+  style: "dart" | "fold" | "mark";
+  label?: string;
+  labelPos?: Point2D;
+}
+
 export interface PatternPiece {
   id: string;
   name: string;
@@ -75,6 +88,7 @@ export interface PatternPiece {
   cutPath: PathCommand[];
   grainline: { x1: number; y1: number; x2: number; y2: number };
   notches: PatternNotch[];
+  internalLines?: PatternInternalLine[];
   labelPos: Point2D;
   labelAngle?: number;
   labelMaxSpanCm?: number;
@@ -99,12 +113,14 @@ export interface PatternResult {
 
 export interface TracingPins {
   shoulder: Point2D; // 1. Hombro
-  neckline: Point2D; // 2. Escote
-  waist: Point2D; // 3. Cintura (1 pieza)
+  neckline: Point2D; // 2. Cuello / Escote
+  armhole: Point2D; // 3. Sisa (Blusa / Chaqueta)
+  waist: Point2D; // Cintura (Vestido, Falda, Pantalón)
+  crotch: Point2D; // 3. Tiro / Entrepierna (Pantalón)
   topEnd: Point2D; // 3. Fin del Top (2 piezas)
   bottomStart: Point2D; // 4. Inicio Falda/Pantalón (2 piezas)
-  hip: Point2D; // 4 (1 pieza) / 5 (2 piezas). Cadera
-  hem: Point2D; // 5 (1 pieza) / 6 (2 piezas). Largo (Ruedo)
+  hip: Point2D; // Cadera
+  hem: Point2D; // Largo (Bota / Ruedo)
 }
 
 export interface GarmentExtras {
@@ -113,6 +129,7 @@ export interface GarmentExtras {
   waistTie: boolean;
   hemRuffle: boolean;
   sidePockets: boolean;
+  flapPockets: boolean;
 }
 
 export const DEFAULT_GARMENT_EXTRAS: GarmentExtras = {
@@ -121,6 +138,7 @@ export const DEFAULT_GARMENT_EXTRAS: GarmentExtras = {
   waistTie: false,
   hemRuffle: false,
   sidePockets: false,
+  flapPockets: false,
 };
 
 export type QuickLengthPreset = "photo" | "mini" | "knee" | "midi" | "maxi";
@@ -139,4 +157,6 @@ export interface SolvedTracingProportions {
   lengthMultiplier: number;
   topLengthMultiplier: number;
   bottomLengthMultiplier: number;
+  crotchDepthMultiplier: number;
+  armholeDepthMultiplier: number;
 }

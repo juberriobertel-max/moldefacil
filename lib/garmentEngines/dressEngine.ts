@@ -5,6 +5,7 @@ import {
   Measurements,
   NecklineStyle,
   PathCommand,
+  PatternInternalLine,
   PatternPiece,
   PatternResult,
   SeamAllowance,
@@ -22,14 +23,19 @@ import {
   packPiecesOnSheet,
 } from "./geometry";
 import {
+  buildFlapPocketPieces,
   buildHemRufflePiece,
   buildKimonoWingSegment,
   buildPocketBagPiece,
   buildShirtDressDetailPieces,
   buildSleevePiece,
+  buildTailoredCollarAndFacingPieces,
+  buildTailoredLapelFrontGeometry,
+  buildVerticalWaistDart,
   buildWaistTiePiece,
   buildWrapFacingPiece,
   computeTorsoWaistHalfWidth,
+  createFlapPocketMarkLine,
   createSidePocketNotches,
 } from "./extrasEngine";
 
@@ -92,7 +98,15 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
       : measurements.bodiceLength + measurements.skirtLength) * lengthMultiplier;
 
   const isEmpireCut = subStyle === "dress" && styleVariant === "empire_cut";
-  const isShirtDress = subStyle === "dress" && styleVariant === "shirt_dress";
+  const isTailoredLapelDress =
+    subStyle === "dress" &&
+    necklineStyle === "tailored_lapel" &&
+    !extras?.wrapFront;
+  const isShirtDress =
+    subStyle === "dress" &&
+    !extras?.wrapFront &&
+    !isTailoredLapelDress &&
+    (styleVariant === "shirt_dress" || necklineStyle === "shirt_collar");
 
   const bodiceLen = isEmpireCut
     ? Math.max(25, Math.round(measurements.bodiceLength * 0.68))
@@ -104,11 +118,11 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
   const isKimono = sleeveStyle === "kimono";
   const neckW = Math.max(6.2, effBust * 0.075);
   const baseNeckDrop =
-    necklineStyle === "v_neck"
+    necklineStyle === "v_neck" || necklineStyle === "tailored_lapel"
       ? 14
       : necklineStyle === "square"
         ? 10.5
-        : necklineStyle === "high"
+        : necklineStyle === "high" || necklineStyle === "shirt_collar"
           ? 4.2
           : 9.5;
   const frontNeckDrop = necklineDropRatio
@@ -185,6 +199,41 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
       const neckDrop = isFront ? frontNeckDrop : backNeckDrop;
       const neckStyle = isFront ? necklineStyle : "round";
       const useWrap = isFront && isWrapFront;
+      const useLapel = isFront && isTailoredLapelDress;
+      const panelLapel = useLapel
+        ? buildTailoredLapelFrontGeometry({
+            neckW,
+            frontNeckDrop,
+            armholeDepth,
+            bodiceLen,
+            totalLen,
+          })
+        : null;
+
+      const panelInternalLines: PatternInternalLine[] = [
+        ...(panelLapel ? panelLapel.internalLines : []),
+        ...(isTailoredLapelDress
+          ? [
+              buildVerticalWaistDart({
+                centerX: Math.max(6.2, quarterBust * (isFront ? 0.48 : 0.44)),
+                topY: armholeDepth + 3.5,
+                waistY: bodiceLen,
+                botY: Math.min(totalLen - 4, bodiceLen + hipDrop * 0.72),
+                halfWidthCm: 1.35,
+                label: isFront ? "Pinza de entalle" : "Pinza espalda",
+              }),
+            ]
+          : []),
+        ...(isFront && extras?.flapPockets
+          ? [
+              createFlapPocketMarkLine({
+                xStart: Math.max(3.5, quarterWaist * 0.25),
+                yTop: Math.min(totalLen - 5, bodiceLen + 5.5),
+                widthCm: 13.5,
+              }),
+            ]
+          : []),
+      ];
 
       const upperSideCommands: PathCommand[] = kimonoWing
         ? [...kimonoWing.commands, { type: "L", x: torsoWaistX, y: bodiceLen }]
@@ -237,31 +286,57 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
             },
             { type: "Z" },
           ]
-        : [
-            { type: "M", x: 0, y: neckDrop },
-            ...buildNecklineCommand(neckW, neckDrop, neckStyle),
-            ...upperSideCommands,
-            {
-              type: "C",
-              cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.45,
-              cp1y: bodiceLen + hipDrop * 0.35,
-              cp2x: quarterHip,
-              cp2y: bodiceLen + hipDrop * 0.72,
-              x: quarterHip,
-              y: bodiceLen + hipDrop,
-            },
-            { type: "L", x: hemHalfWidth, y: totalLen },
-            {
-              type: "C",
-              cp1x: hemHalfWidth * 0.65,
-              cp1y: totalLen + 1.2,
-              cp2x: hemHalfWidth * 0.3,
-              cp2y: totalLen + 0.4,
-              x: 0,
-              y: totalLen,
-            },
-            { type: "Z" },
-          ];
+        : panelLapel
+          ? [
+              { type: "M", x: neckW, y: 0 },
+              ...upperSideCommands,
+              {
+                type: "C",
+                cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.45,
+                cp1y: bodiceLen + hipDrop * 0.35,
+                cp2x: quarterHip,
+                cp2y: bodiceLen + hipDrop * 0.72,
+                x: quarterHip,
+                y: bodiceLen + hipDrop,
+              },
+              { type: "L", x: hemHalfWidth, y: totalLen },
+              {
+                type: "C",
+                cp1x: hemHalfWidth * 0.65,
+                cp1y: totalLen + 1.2,
+                cp2x: 0,
+                cp2y: totalLen + 0.4,
+                x: -panelLapel.buttonOverlap,
+                y: totalLen,
+              },
+              ...panelLapel.closingCommands.slice(1),
+              { type: "Z" },
+            ]
+          : [
+              { type: "M", x: 0, y: neckDrop },
+              ...buildNecklineCommand(neckW, neckDrop, neckStyle),
+              ...upperSideCommands,
+              {
+                type: "C",
+                cp1x: torsoWaistX + (quarterHip - torsoWaistX) * 0.45,
+                cp1y: bodiceLen + hipDrop * 0.35,
+                cp2x: quarterHip,
+                cp2y: bodiceLen + hipDrop * 0.72,
+                x: quarterHip,
+                y: bodiceLen + hipDrop,
+              },
+              { type: "L", x: hemHalfWidth, y: totalLen },
+              {
+                type: "C",
+                cp1x: hemHalfWidth * 0.65,
+                cp1y: totalLen + 1.2,
+                cp2x: hemHalfWidth * 0.3,
+                cp2y: totalLen + 0.4,
+                x: 0,
+                y: totalLen,
+              },
+              { type: "Z" },
+            ];
 
       return normalizePiece(
         {
@@ -269,7 +344,7 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
           name,
           subtitle: kimonoWing
             ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoWing.underarmCurveLenCm} cm`
-            : useWrap
+            : useWrap || useLapel
               ? "Cortar 2 piezas (Izquierda y Derecha)"
               : "Corpiño + Falda ensamblados",
           tabLabel,
@@ -308,6 +383,7 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
                   : "Cintura",
             },
             { x: quarterHip, y: bodiceLen + hipDrop, angle: 0, label: "Cadera" },
+            ...(panelLapel ? panelLapel.notches : []),
             ...(useWrap
               ? [
                   {
@@ -326,9 +402,10 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
               : []),
             ...sidePocketNotches,
           ],
+          internalLines: panelInternalLines.length > 0 ? panelInternalLines : undefined,
           labelPos: { x: quarterWaist * 0.48, y: bodiceLen * 0.7 },
           foldLine:
-            isFront && !useWrap && !isShirtDress
+            isFront && !useWrap && !isShirtDress && !useLapel
               ? { x1: 0, y1: neckDrop, x2: 0, y2: totalLen }
               : undefined,
         },
@@ -341,12 +418,18 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
         "front",
         isWrapFront
           ? "DELANTERO CRUZADO VESTIDO (x2)"
-          : isShirtDress
-            ? "DELANTERO CAMISERO (x2)"
-            : isEmpireCut
-              ? "DELANTERO CORTE IMPERIO (x1 doblez)"
-              : "DELANTERO VESTIDO (x1 doblez)",
-        isWrapFront ? "Delantero Cruzado" : "Delantero",
+          : isTailoredLapelDress
+            ? "DELANTERO BLAZER VESTIDO (x2)"
+            : isShirtDress
+              ? "DELANTERO CAMISERO (x2)"
+              : isEmpireCut
+                ? "DELANTERO CORTE IMPERIO (x1 doblez)"
+                : "DELANTERO VESTIDO (x1 doblez)",
+        isWrapFront
+          ? "Delantero Cruzado"
+          : isTailoredLapelDress
+            ? "Delantero Solapa"
+            : "Delantero",
         true
       )
     );
@@ -364,7 +447,20 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
       );
     }
 
-    if (isShirtDress) {
+    if (isTailoredLapelDress) {
+      pieces.push(
+        ...buildTailoredCollarAndFacingPieces({
+          neckW,
+          shoulderX,
+          shoulderSlope,
+          frontNeckDrop,
+          armholeDepth,
+          bodiceLen,
+          totalLen,
+          seamAllowance,
+        })
+      );
+    } else if (isShirtDress) {
       pieces.push(
         ...buildShirtDressDetailPieces({
           neckW,
@@ -381,6 +477,9 @@ export function generateDressPattern(input: DressEngineInput): PatternResult {
     }
     if (extras?.sidePockets) {
       pieces.push(buildPocketBagPiece(seamAllowance));
+    }
+    if (extras?.flapPockets) {
+      pieces.push(...buildFlapPocketPieces(seamAllowance));
     }
   } else {
     // JUMPSUIT (Enterizo): Corpiño ensamblado con tiro y pierna

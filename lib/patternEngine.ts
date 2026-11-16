@@ -95,6 +95,7 @@ export function generateUniversalPattern(
         seamAllowance,
         fabricType,
         necklineDropRatio: tracingProportions?.necklineDropRatio,
+        armholeDepthMultiplier: tracingProportions?.armholeDepthMultiplier,
         lengthMultiplier: lengthMult,
         extras,
         styleVariant,
@@ -106,6 +107,7 @@ export function generateUniversalPattern(
         seamAllowance,
         fabricType,
         lengthMultiplier: lengthMult,
+        crotchDepthMultiplier: tracingProportions?.crotchDepthMultiplier,
         extras,
       });
     case "skirt":

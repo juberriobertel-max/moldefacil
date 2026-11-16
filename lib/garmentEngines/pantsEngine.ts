@@ -15,9 +15,11 @@ import {
   packPiecesOnSheet,
 } from "./geometry";
 import {
+  buildFlapPocketPieces,
   buildPocketBagPiece,
   buildWaistbandPiece,
   buildWaistTiePiece,
+  createFlapPocketMarkLine,
   createSidePocketNotches,
 } from "./extrasEngine";
 
@@ -27,6 +29,7 @@ export interface PantsEngineInput {
   seamAllowance: SeamAllowance;
   fabricType: FabricType;
   lengthMultiplier?: number;
+  crotchDepthMultiplier?: number;
   extras?: GarmentExtras;
   includeWaistband?: boolean;
 }
@@ -38,6 +41,7 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
     seamAllowance,
     fabricType,
     lengthMultiplier = 1,
+    crotchDepthMultiplier = 1,
     extras,
     includeWaistband = true,
   } = input;
@@ -52,7 +56,9 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
   const quarterWaist = effWaist / 4;
   const quarterHip = effHip / 4;
 
-  const crotchDepth = Math.max(20, measurements.crotchDepth);
+  const crotchDepth = Number(
+    Math.min(42, Math.max(18, measurements.crotchDepth * crotchDepthMultiplier)).toFixed(1)
+  );
   const legLength =
     (subStyle === "shorts"
       ? Math.min(26, Math.max(12, measurements.inseam * 0.25))
@@ -173,6 +179,15 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
               })
             : []),
         ],
+        internalLines: extras?.flapPockets
+          ? [
+              createFlapPocketMarkLine({
+                xStart: frontCenterX - quarterHip * 0.25,
+                yTop: Math.max(5, crotchDepth * 0.28),
+                widthCm: 13.5,
+              }),
+            ]
+          : undefined,
         labelPos: { x: frontCenterX, y: crotchDepth * 1.15 },
       },
       seamAllowance
@@ -319,6 +334,9 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
   }
   if (extras?.sidePockets) {
     pieces.push(buildPocketBagPiece(seamAllowance));
+  }
+  if (extras?.flapPockets) {
+    pieces.push(...buildFlapPocketPieces(seamAllowance));
   }
   if (extras?.waistTie) {
     pieces.push(buildWaistTiePiece(effWaist, seamAllowance));
