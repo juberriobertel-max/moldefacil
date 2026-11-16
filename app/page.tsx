@@ -30,6 +30,7 @@ import {
   SleeveStyle,
   StyleVariant,
   TopSubStyle,
+  TorsoFit,
   TracingPins,
   TwoPieceBottomStyle,
   TwoPieceTopStyle,
@@ -37,6 +38,7 @@ import {
 import { generateUniversalPattern } from "@/lib/patternEngine";
 import { resolveQuickLength } from "@/lib/garmentEngines/extrasEngine";
 import { FashionStylePreset } from "@/lib/fashionStylesCatalog";
+import { DetectedGarmentConfig } from "@/lib/browserStyleDetector";
 import {
   DEFAULT_TRACING_PINS,
   solveTracingProportions,
@@ -169,6 +171,7 @@ export default function HomePage() {
     useState<TwoPieceBottomStyle>("aline_skirt");
   const [necklineStyle, setNecklineStyle] = useState<NecklineStyle>("round");
   const [sleeveStyle, setSleeveStyle] = useState<SleeveStyle>("short");
+  const [torsoFit, setTorsoFit] = useState<TorsoFit>("fitted");
   const [extras, setExtras] = useState<GarmentExtras>(DEFAULT_GARMENT_EXTRAS);
   const [quickLength, setQuickLength] = useState<QuickLengthPreset>("photo");
   const [styleVariant, setStyleVariant] = useState<StyleVariant>("default");
@@ -204,11 +207,30 @@ export default function HomePage() {
     if (c.twoPieceBottomStyle) setTwoPieceBottomStyle(c.twoPieceBottomStyle);
     if (c.necklineStyle) setNecklineStyle(c.necklineStyle);
     if (c.sleeveStyle) setSleeveStyle(c.sleeveStyle);
+    setTorsoFit(c.torsoFit ?? "fitted");
     if (c.fabricType) setFabricType(c.fabricType);
     setExtras(c.extras);
     setQuickLength(c.quickLength);
     setStyleVariant(c.styleVariant);
     setActiveFashionStyleId(preset.id);
+    setActivePieceId("all");
+  };
+
+  const applyDetectedAttributes = (cfg: DetectedGarmentConfig) => {
+    setCategory(cfg.category);
+    if (cfg.topSubStyle) setTopSubStyle(cfg.topSubStyle);
+    if (cfg.pantsSubStyle) setPantsSubStyle(cfg.pantsSubStyle);
+    if (cfg.skirtSubStyle) setSkirtSubStyle(cfg.skirtSubStyle);
+    if (cfg.dressSubStyle) setDressSubStyle(cfg.dressSubStyle);
+    if (cfg.twoPieceTopStyle) setTwoPieceTopStyle(cfg.twoPieceTopStyle);
+    if (cfg.twoPieceBottomStyle) setTwoPieceBottomStyle(cfg.twoPieceBottomStyle);
+    setNecklineStyle(cfg.necklineStyle);
+    setSleeveStyle(cfg.sleeveStyle);
+    setTorsoFit(cfg.torsoFit);
+    setExtras(cfg.extras);
+    setQuickLength(cfg.quickLength);
+    setStyleVariant(cfg.styleVariant);
+    setActiveFashionStyleId(null);
     setActivePieceId("all");
   };
 
@@ -229,6 +251,7 @@ export default function HomePage() {
         twoPieceBottomStyle,
         necklineStyle,
         sleeveStyle,
+        torsoFit,
         measurements,
         seamAllowance,
         fabricType,
@@ -247,6 +270,7 @@ export default function HomePage() {
       twoPieceBottomStyle,
       necklineStyle,
       sleeveStyle,
+      torsoFit,
       measurements,
       seamAllowance,
       fabricType,
@@ -465,6 +489,11 @@ export default function HomePage() {
                       setSleeveStyle(sl);
                       setActiveFashionStyleId(null);
                     }}
+                    torsoFit={torsoFit}
+                    onTorsoFitChange={(fit) => {
+                      setTorsoFit(fit);
+                      setActiveFashionStyleId(null);
+                    }}
                     skirtSubStyle={skirtSubStyle}
                     onSkirtSubStyleChange={(sk) => {
                       setSkirtSubStyle(sk);
@@ -495,7 +524,7 @@ export default function HomePage() {
                       setQuickLength(q);
                       setActiveFashionStyleId(null);
                     }}
-                    onApplyFashionPreset={applyFashionPreset}
+                    onApplyDetectedAttributes={applyDetectedAttributes}
                   />
                 ) : (
                   <div className="space-y-4">
@@ -670,19 +699,20 @@ export default function HomePage() {
                             <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                               Mangas
                             </label>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-2 gap-2">
                               {(
                                 [
                                   { id: "sleeveless", label: "Sin mangas" },
-                                  { id: "short", label: "Corta" },
-                                  { id: "long", label: "Larga" },
+                                  { id: "short", label: "Manga corta" },
+                                  { id: "long", label: "Manga larga" },
+                                  { id: "kimono", label: "Kimono / Murciélago" },
                                 ] as const
                               ).map((sl) => (
                                 <button
                                   key={sl.id}
                                   type="button"
                                   onClick={() => setSleeveStyle(sl.id)}
-                                  className={`min-h-[48px] rounded-xl text-sm sm:text-base font-semibold border transition cursor-pointer ${
+                                  className={`min-h-[48px] px-2.5 rounded-xl text-sm font-semibold border transition cursor-pointer ${
                                     sleeveStyle === sl.id
                                       ? "bg-teal-600 text-white border-teal-600"
                                       : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:bg-slate-100"
@@ -846,6 +876,51 @@ export default function HomePage() {
                     </button>
                   </div>
                 </div>
+
+                {/* Waist / Torso Silhouette Selector */}
+                {(category === "top" ||
+                  category === "dress" ||
+                  category === "two_piece") && (
+                  <div className="space-y-2">
+                    <span className="block text-base font-bold text-slate-800">
+                      Ajuste de la cintura
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTorsoFit("fitted")}
+                        className={`min-h-[54px] px-3.5 py-2.5 rounded-xl border-2 text-left transition cursor-pointer ${
+                          torsoFit === "fitted"
+                            ? "bg-teal-50 border-teal-600 text-teal-900"
+                            : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="text-base font-bold">
+                          Entallado (al cuerpo)
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Cintura definida con curva al costado
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTorsoFit("loose")}
+                        className={`min-h-[54px] px-3.5 py-2.5 rounded-xl border-2 text-left transition cursor-pointer ${
+                          torsoFit === "loose"
+                            ? "bg-teal-50 border-teal-600 text-teal-900"
+                            : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="text-base font-bold">
+                          Holgado / Blusado (para cinturón)
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Sin entalle, +5 cm de soltura para fruncir
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Friendly Seam Allowance Selector */}
                 <div className="space-y-2">

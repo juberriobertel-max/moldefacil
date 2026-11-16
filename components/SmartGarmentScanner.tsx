@@ -10,13 +10,16 @@ import {
   QuickLengthPreset,
   SkirtSubStyle,
   SleeveStyle,
+  TorsoFit,
   TracingPins,
   TwoPieceBottomStyle,
   TwoPieceTopStyle,
 } from "@/lib/types";
 import { DEFAULT_TRACING_PINS } from "@/lib/proportionSolver";
-import { FashionStylePreset } from "@/lib/fashionStylesCatalog";
-import { detectFashionStyleInBrowser } from "@/lib/browserStyleDetector";
+import {
+  DetectedGarmentConfig,
+  detectFashionStyleInBrowser,
+} from "@/lib/browserStyleDetector";
 import {
   GarmentExtrasSelector,
   QuickLengthSelector,
@@ -31,6 +34,8 @@ interface SmartGarmentScannerProps {
   onNecklineStyleChange: (style: NecklineStyle) => void;
   sleeveStyle: SleeveStyle;
   onSleeveStyleChange: (style: SleeveStyle) => void;
+  torsoFit: TorsoFit;
+  onTorsoFitChange: (fit: TorsoFit) => void;
   skirtSubStyle: SkirtSubStyle;
   onSkirtSubStyleChange: (style: SkirtSubStyle) => void;
   pantsSubStyle: PantsSubStyle;
@@ -43,7 +48,7 @@ interface SmartGarmentScannerProps {
   onExtrasChange: (extras: GarmentExtras) => void;
   quickLength: QuickLengthPreset;
   onQuickLengthChange: (preset: QuickLengthPreset) => void;
-  onApplyFashionPreset: (preset: FashionStylePreset) => void;
+  onApplyDetectedAttributes: (config: DetectedGarmentConfig) => void;
 }
 
 type PinKey = keyof TracingPins;
@@ -235,6 +240,9 @@ function SleeveIcon({ style }: { style: SleeveStyle }) {
       {style === "long" && (
         <path d="M14 6 L26 6 L37 24 L32 26 L26 15 L26 28 L14 28 L14 15 L8 26 L3 24 Z" />
       )}
+      {style === "kimono" && (
+        <path d="M14 6 L26 6 L37 14 L35 22 C30 21, 27 21, 26 28 L14 28 C13 21, 10 21, 5 22 L3 14 Z" />
+      )}
     </svg>
   );
 }
@@ -276,6 +284,8 @@ export default function SmartGarmentScanner({
   onNecklineStyleChange,
   sleeveStyle,
   onSleeveStyleChange,
+  torsoFit,
+  onTorsoFitChange,
   skirtSubStyle,
   onSkirtSubStyleChange,
   pantsSubStyle,
@@ -288,7 +298,7 @@ export default function SmartGarmentScanner({
   onExtrasChange,
   quickLength,
   onQuickLengthChange,
-  onApplyFashionPreset,
+  onApplyDetectedAttributes,
 }: SmartGarmentScannerProps) {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [draggingPin, setDraggingPin] = useState<PinKey | null>(null);
@@ -296,7 +306,7 @@ export default function SmartGarmentScanner({
   const [detectionState, setDetectionState] = useState<
     | { status: "idle" }
     | { status: "analyzing"; progress?: number }
-    | { status: "detected"; styleName: string }
+    | { status: "detected" }
     | { status: "fallback"; reason: string }
   >({ status: "idle" });
 
@@ -306,6 +316,50 @@ export default function SmartGarmentScanner({
 
   const isTwoPiece = category === "two_piece";
   const activePins = isTwoPiece ? TWO_PIECE_PINS : ONE_PIECE_PINS;
+
+  const detectedBadges = (() => {
+    const badges: string[] = [];
+    const catLabels: Record<GarmentCategory, string> = {
+      dress: "Vestido",
+      two_piece: "Conjunto 2 Piezas",
+      top: "Blusa",
+      skirt: "Falda",
+      pants: "Pantalón",
+    };
+    badges.push(catLabels[category]);
+
+    if (category === "dress" || category === "top" || category === "two_piece") {
+      if (extras.wrapFront) {
+        badges.push("Frente Cruzado");
+      } else {
+        const nkMap: Record<NecklineStyle, string> = {
+          v_neck: "Escote en V",
+          round: "Escote Redondo",
+          square: "Escote Cuadrado",
+          high: "Cuello Alto",
+        };
+        badges.push(nkMap[necklineStyle]);
+      }
+
+      const slMap: Record<SleeveStyle, string> = {
+        kimono: "Manga Kimono",
+        short: "Manga Corta",
+        long: "Manga Larga",
+        sleeveless: "Sin Mangas",
+      };
+      badges.push(slMap[sleeveStyle]);
+
+      badges.push(
+        torsoFit === "loose" ? "Torso Holgado" : "Torso Entallado"
+      );
+    }
+
+    if (extras.waistTie) badges.push("Con Cinturón");
+    if (extras.hemRuffle) badges.push("Con Bolero / Volante");
+    if (extras.flaredSleeve) badges.push("Manga Acampanada");
+    if (extras.sidePockets) badges.push("Con Bolsillos");
+    return badges;
+  })();
 
   const runStyleDetection = async (dataUrl: string) => {
     const seq = ++analysisSeqRef.current;
@@ -320,8 +374,8 @@ export default function SmartGarmentScanner({
     if (analysisSeqRef.current !== seq) return;
 
     if (res.status === "detected") {
-      onApplyFashionPreset(res.preset);
-      setDetectionState({ status: "detected", styleName: res.preset.name });
+      onApplyDetectedAttributes(res.config);
+      setDetectionState({ status: "detected" });
     } else {
       setDetectionState({ status: "fallback", reason: res.reason });
     }
@@ -452,12 +506,12 @@ export default function SmartGarmentScanner({
         </div>
       ) : (
         <div className="space-y-3">
-          {/* Discreet zero-shot browser style detection status */}
+          {/* Discreet multi-attribute zero-shot browser analysis status */}
           {detectionState.status === "analyzing" && (
             <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-900 flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
               <span>
-                Analizando el estilo de la prenda en tu navegador...
+                Analizando prenda, mangas, caída y detalles en tu navegador...
                 {typeof detectionState.progress === "number" &&
                 detectionState.progress > 0 &&
                 detectionState.progress < 100
@@ -467,19 +521,9 @@ export default function SmartGarmentScanner({
             </div>
           )}
 
-          {detectionState.status === "detected" && (
-            <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-sm text-emerald-950 flex items-start gap-2">
-              <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <span>
-                Estilo detectado: <strong>{detectionState.styleName}</strong>{" "}
-                (puedes cambiarlo abajo si deseas ajustarlo)
-              </span>
-            </div>
-          )}
-
           {detectionState.status === "fallback" && (
             <div className="rounded-xl bg-slate-100 border border-slate-200 px-3 py-2 text-xs text-slate-600">
-              Análisis automático no disponible en este momento; elige el estilo
+              Análisis automático no disponible en este momento; elige la prenda
               y sus partes manualmente abajo.
             </div>
           )}
@@ -632,6 +676,32 @@ export default function SmartGarmentScanner({
               })}
             </div>
           </div>
+
+          {/* Editable Multi-Attribute Detection Summary Card */}
+          {detectionState.status === "detected" && (
+            <div
+              data-testid="detected-attributes-card"
+              className="rounded-2xl bg-emerald-50 border border-emerald-200 p-3.5 space-y-2.5"
+            >
+              <div className="flex items-start gap-2 text-sm text-emerald-950 font-medium leading-snug">
+                <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <span>
+                  Esto es lo que detectamos en tu foto. Toca cualquier botón
+                  abajo si quieres cambiar algo
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {detectedBadges.map((badge) => (
+                  <span
+                    key={badge}
+                    className="inline-flex items-center px-2.5 py-1 rounded-full bg-white border border-emerald-300 text-xs font-bold text-emerald-900 shadow-2xs"
+                  >
+                    ✓ {badge}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -779,34 +849,64 @@ export default function SmartGarmentScanner({
         {(category === "top" ||
           category === "dress" ||
           category === "two_piece") && (
-          <div className="space-y-1.5">
-            <span className="block text-sm font-bold text-slate-700">
-              3. Mangas
-            </span>
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  { id: "sleeveless", label: "Sin mangas" },
-                  { id: "short", label: "Manga corta" },
-                  { id: "long", label: "Manga larga" },
-                ] as const
-              ).map((sl) => (
-                <button
-                  key={sl.id}
-                  type="button"
-                  onClick={() => onSleeveStyleChange(sl.id)}
-                  className={`min-h-[68px] p-2 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 text-center transition cursor-pointer ${
-                    sleeveStyle === sl.id
-                      ? "bg-teal-50 border-teal-600 text-teal-900 shadow-2xs"
-                      : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
-                  }`}
-                >
-                  <SleeveIcon style={sl.id} />
-                  <span className="text-xs font-bold leading-tight">
-                    {sl.label}
-                  </span>
-                </button>
-              ))}
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <span className="block text-sm font-bold text-slate-700">
+                3. Mangas
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    { id: "sleeveless", label: "Sin mangas" },
+                    { id: "short", label: "Manga corta" },
+                    { id: "long", label: "Manga larga" },
+                    { id: "kimono", label: "Kimono / Murciélago" },
+                  ] as const
+                ).map((sl) => (
+                  <button
+                    key={sl.id}
+                    type="button"
+                    onClick={() => onSleeveStyleChange(sl.id)}
+                    className={`min-h-[60px] p-2.5 rounded-2xl border-2 flex items-center gap-2 text-left transition cursor-pointer ${
+                      sleeveStyle === sl.id
+                        ? "bg-teal-50 border-teal-600 text-teal-900 shadow-2xs"
+                        : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    <SleeveIcon style={sl.id} />
+                    <span className="text-xs sm:text-sm font-bold leading-tight">
+                      {sl.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="block text-sm font-bold text-slate-700">
+                Ajuste de la cintura
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    { id: "fitted", label: "Entallado (al cuerpo)" },
+                    { id: "loose", label: "Holgado / Blusado (cinturón)" },
+                  ] as const
+                ).map((fit) => (
+                  <button
+                    key={fit.id}
+                    type="button"
+                    onClick={() => onTorsoFitChange(fit.id)}
+                    className={`min-h-[50px] px-2.5 py-2 rounded-xl border-2 text-xs sm:text-sm font-bold text-left transition cursor-pointer ${
+                      torsoFit === fit.id
+                        ? "bg-teal-600 text-white border-teal-600"
+                        : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                    }`}
+                  >
+                    {fit.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
