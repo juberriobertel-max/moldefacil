@@ -11,6 +11,7 @@ import {
   TorsoFit,
 } from "../types";
 import { cubicBezierLength, normalizePiece } from "./geometry";
+import { solveSleeveCapDimensions } from "../seamValidator";
 
 export const QUICK_LENGTH_LABELS: Record<QuickLengthPreset, string> = {
   photo: "Según medida / foto",
@@ -281,17 +282,8 @@ export function buildSleevePiece(params: {
   const effectiveStyle: Exclude<SleeveStyle, "sleeveless" | "kimono"> =
     sleeveStyle === "sleeveless" ? "short" : sleeveStyle;
 
-  const capHeight = Math.max(12, armholeDepth * 0.65);
-  const sleeveWidth = Math.max(
-    28,
-    Math.sqrt(
-      Math.max(
-        100,
-        totalArmholePerimeter * totalArmholePerimeter -
-          capHeight * capHeight * 2.2
-      )
-    ) * 0.88
-  );
+  const { capHeight, sleeveWidth, capArcLengthCm, easeCm } =
+    solveSleeveCapDimensions(totalArmholePerimeter, armholeDepth, 1.25);
   const halfSleeve = sleeveWidth / 2;
   const sleeveLen =
     effectiveStyle === "short"
@@ -398,8 +390,8 @@ export function buildSleevePiece(params: {
         ? `MANGA ${effectiveStyle === "long" ? "LARGA" : "CORTA"} ACAMPANADA (x2)`
         : `MANGA ${effectiveStyle === "long" ? "LARGA" : "CORTA"} (x2)`,
       subtitle: flaredSleeve
-        ? `Caída acampanada | Sisa: ${totalArmholePerimeter.toFixed(1)} cm`
-        : `Sisa: ${totalArmholePerimeter.toFixed(1)} cm`,
+        ? `Caída acampanada | Sisa: ${totalArmholePerimeter.toFixed(1)} cm → Copa: ${capArcLengthCm.toFixed(1)} cm (+${easeCm.toFixed(2)} cm)`
+        : `Sisa: ${totalArmholePerimeter.toFixed(1)} cm → Copa: ${capArcLengthCm.toFixed(1)} cm (+${easeCm.toFixed(2)} cm embebido)`,
       tabLabel: flaredSleeve ? "Manga Acampanada" : "Manga",
       seamPath: sleeveSeam,
       grainline: { x1: halfSleeve, y1: 4, x2: halfSleeve, y2: sleeveLen - 4 },

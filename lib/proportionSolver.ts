@@ -17,6 +17,7 @@ export function getDefaultPinsForCategory(
 ): TracingPins {
   switch (category) {
     case "pants":
+    case "loungewear":
       return {
         ...DEFAULT_TRACING_PINS,
         waist: { x: 0.34, y: 0.14 },
@@ -25,6 +26,7 @@ export function getDefaultPinsForCategory(
         hem: { x: 0.33, y: 0.88 },
       };
     case "skirt":
+    case "accessories":
       return {
         ...DEFAULT_TRACING_PINS,
         waist: { x: 0.36, y: 0.18 },
@@ -39,6 +41,8 @@ export function getDefaultPinsForCategory(
         armhole: { x: 0.34, y: 0.33 },
         hem: { x: 0.36, y: 0.68 },
       };
+    case "jumpsuit":
+    case "kids":
     case "two_piece":
     case "dress":
     default:

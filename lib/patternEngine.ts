@@ -1,8 +1,12 @@
 import {
+  AccessorySubStyle,
   DressSubStyle,
   FabricType,
   GarmentCategory,
   GarmentExtras,
+  JumpsuitSubStyle,
+  KidsSubStyle,
+  LoungewearSubStyle,
   Measurements,
   NecklineStyle,
   PantsSubStyle,
@@ -25,6 +29,11 @@ import { generatePantsPattern } from "./garmentEngines/pantsEngine";
 import { generateSkirtPattern } from "./garmentEngines/skirtEngine";
 import { generateDressPattern } from "./garmentEngines/dressEngine";
 import { generateTwoPiecePattern } from "./garmentEngines/twoPieceEngine";
+import { generateJumpsuitPattern } from "./garmentEngines/jumpsuitEngine";
+import { generateKidsPattern } from "./garmentEngines/kidsEngine";
+import { generateLoungewearPattern } from "./garmentEngines/loungewearEngine";
+import { generateAccessoriesPattern } from "./garmentEngines/accessoriesEngine";
+import { sanitizeMeasurements, validatePatternSeams } from "./seamValidator";
 
 export { commandsToSvgPath };
 
@@ -36,6 +45,10 @@ export interface GenerateUniversalPatternInput {
   dressSubStyle: DressSubStyle;
   twoPieceTopStyle: TwoPieceTopStyle;
   twoPieceBottomStyle: TwoPieceBottomStyle;
+  jumpsuitSubStyle?: JumpsuitSubStyle;
+  kidsSubStyle?: KidsSubStyle;
+  loungewearSubStyle?: LoungewearSubStyle;
+  accessorySubStyle?: AccessorySubStyle;
   necklineStyle: NecklineStyle;
   sleeveStyle: SleeveStyle;
   torsoFit?: TorsoFit;
@@ -59,6 +72,10 @@ export function generateUniversalPattern(
     dressSubStyle,
     twoPieceTopStyle,
     twoPieceBottomStyle,
+    jumpsuitSubStyle = "romper_long",
+    kidsSubStyle = "baby_bodysuit",
+    loungewearSubStyle = "leggings",
+    accessorySubStyle = "bucket_hat",
     necklineStyle,
     sleeveStyle,
     torsoFit = "fitted",
@@ -71,11 +88,15 @@ export function generateUniversalPattern(
     styleVariant = "default",
   } = input;
 
+  // 1. Smart anatomical bounds & ratio stabilization to prevent Bézier inversions
+  const { sanitized: safeMeasurements, warnings } =
+    sanitizeMeasurements(measurements);
+
   const {
     measurements: effectiveMeasurements,
     overrideBottomLength,
     topScaleForLength,
-  } = resolveQuickLength(measurements, quickLength, category);
+  } = resolveQuickLength(safeMeasurements, quickLength, category);
 
   const lengthMult = overrideBottomLength
     ? 1
@@ -84,9 +105,11 @@ export function generateUniversalPattern(
     ? 1
     : tracingProportions?.bottomLengthMultiplier;
 
+  let rawResult: PatternResult;
+
   switch (category) {
     case "top":
-      return generateTopPattern({
+      rawResult = generateTopPattern({
         measurements: effectiveMeasurements,
         subStyle: topSubStyle,
         necklineStyle,
@@ -100,8 +123,9 @@ export function generateUniversalPattern(
         extras,
         styleVariant,
       });
+      break;
     case "pants":
-      return generatePantsPattern({
+      rawResult = generatePantsPattern({
         measurements: effectiveMeasurements,
         subStyle: pantsSubStyle,
         seamAllowance,
@@ -110,8 +134,9 @@ export function generateUniversalPattern(
         crotchDepthMultiplier: tracingProportions?.crotchDepthMultiplier,
         extras,
       });
+      break;
     case "skirt":
-      return generateSkirtPattern({
+      rawResult = generateSkirtPattern({
         measurements: effectiveMeasurements,
         subStyle: skirtSubStyle,
         seamAllowance,
@@ -120,8 +145,9 @@ export function generateUniversalPattern(
         lengthMultiplier: lengthMult,
         extras,
       });
+      break;
     case "dress":
-      return generateDressPattern({
+      rawResult = generateDressPattern({
         measurements: effectiveMeasurements,
         subStyle: dressSubStyle,
         necklineStyle,
@@ -137,8 +163,9 @@ export function generateUniversalPattern(
         extras,
         styleVariant,
       });
+      break;
     case "two_piece":
-      return generateTwoPiecePattern({
+      rawResult = generateTwoPiecePattern({
         measurements: effectiveMeasurements,
         topStyle: twoPieceTopStyle,
         bottomStyle: twoPieceBottomStyle,
@@ -154,5 +181,52 @@ export function generateUniversalPattern(
         flareRatio: tracingProportions?.flareRatio,
         extras,
       });
+      break;
+    case "jumpsuit":
+      rawResult = generateJumpsuitPattern({
+        measurements: effectiveMeasurements,
+        subStyle: jumpsuitSubStyle,
+        necklineStyle,
+        sleeveStyle,
+        torsoFit,
+        seamAllowance,
+        fabricType,
+        lengthMultiplier: lengthMult,
+        extras,
+      });
+      break;
+    case "kids":
+      rawResult = generateKidsPattern({
+        measurements: effectiveMeasurements,
+        subStyle: kidsSubStyle,
+        seamAllowance,
+        fabricType,
+        lengthMultiplier: lengthMult,
+        extras,
+      });
+      break;
+    case "loungewear":
+      rawResult = generateLoungewearPattern({
+        measurements: effectiveMeasurements,
+        subStyle: loungewearSubStyle,
+        seamAllowance,
+        fabricType,
+        lengthMultiplier: lengthMult,
+        extras,
+      });
+      break;
+    case "accessories":
+      rawResult = generateAccessoriesPattern({
+        measurements: effectiveMeasurements,
+        subStyle: accessorySubStyle,
+        seamAllowance,
+        fabricType,
+      });
+      break;
   }
+
+  return {
+    ...rawResult,
+    seamValidation: validatePatternSeams(rawResult, warnings),
+  };
 }

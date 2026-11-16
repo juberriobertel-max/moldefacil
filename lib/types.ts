@@ -2,12 +2,25 @@ export type SeamAllowance = 0 | 1 | 1.5;
 
 export type FabricType = "woven" | "stretch";
 
-export type GarmentCategory = "top" | "pants" | "skirt" | "dress" | "two_piece";
+export type GarmentCategory =
+  | "top"
+  | "pants"
+  | "skirt"
+  | "dress"
+  | "two_piece"
+  | "jumpsuit"
+  | "kids"
+  | "loungewear"
+  | "accessories";
 
 export type TopSubStyle = "tshirt" | "blouse" | "jacket";
 export type PantsSubStyle = "straight" | "wide" | "shorts";
 export type SkirtSubStyle = "straight" | "a_line" | "semicircular";
 export type DressSubStyle = "dress" | "jumpsuit";
+export type JumpsuitSubStyle = "romper_long" | "romper_short" | "overall";
+export type KidsSubStyle = "baby_bodysuit" | "kids_dress" | "kids_pants";
+export type LoungewearSubStyle = "leggings" | "classic_pajama";
+export type AccessorySubStyle = "bucket_hat" | "apron" | "zipper_pouch";
 
 export type TwoPieceTopStyle = "crop_top" | "waist_blouse" | "jacket_blazer";
 export type TwoPieceBottomStyle =
@@ -45,6 +58,7 @@ export interface Measurements {
   thigh: number;
   inseam: number;
   hemWidth: number;
+  headCircumference?: number;
 }
 
 export type PathCommand =
@@ -96,6 +110,21 @@ export interface PatternPiece {
   foldLine?: { x1: number; y1: number; x2: number; y2: number };
 }
 
+export interface SeamCheckItem {
+  id: string;
+  label: string;
+  detail: string;
+  passed: boolean;
+  diffMm: number;
+}
+
+export interface SeamValidationReport {
+  verified: boolean;
+  badgeText: string;
+  checks: SeamCheckItem[];
+  stabilizedNotes?: string[];
+}
+
 export interface PatternResult {
   category: GarmentCategory;
   subStyleLabel: string;
@@ -109,6 +138,7 @@ export interface PatternResult {
     height: number;
   };
   appliedEaseLabel: string;
+  seamValidation?: SeamValidationReport;
 }
 
 export interface TracingPins {
