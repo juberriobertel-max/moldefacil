@@ -357,7 +357,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-slate-800">
+    <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-slate-800 overflow-x-hidden">
       {/* Warm, Inviting Header */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur px-4 lg:px-8 py-3.5 shadow-2xs">
         <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-4">
@@ -389,7 +389,7 @@ export default function HomePage() {
       {/* Main 2-Column Sewing Studio */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* LEFT COLUMN: 3-Step Guided Assistant + Box Ad */}
-        <aside className="lg:col-span-5 xl:col-span-4 flex flex-col gap-4">
+        <aside className="min-w-0 lg:col-span-5 xl:col-span-4 flex flex-col gap-4">
           {/* PASO 1: Elige cómo empezar */}
           <section className="rounded-3xl bg-white border border-slate-200 shadow-xs overflow-hidden">
             <button
@@ -1051,13 +1051,13 @@ export default function HomePage() {
           </section>
 
           {/* LOCATION 2: Box Ad (300x250) at bottom of Left Panel */}
-          <div className="pt-1">
+          <div className="pt-1 w-full flex justify-center">
             <AdBanner variant="box-ad" adSlotId="sidebar-box-300x250" />
           </div>
         </aside>
 
-        {/* RIGHT COLUMN: White Cutting Mat Canvas + Bottom Horizontal Banner */}
-        <section className="lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
+        {/* RIGHT COLUMN: White Cutting Mat Canvas + Bottom Responsive Banner */}
+        <section className="min-w-0 lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
           <div className="flex-1 min-h-[540px]">
             <PatternCanvas
               pattern={pattern}
@@ -1070,11 +1070,19 @@ export default function HomePage() {
             />
           </div>
 
-          {/* LOCATION 1: Discreet Horizontal Ad Banner (728x90) at bottom of workspace */}
-          <AdBanner
-            variant="horizontal-banner"
-            adSlotId="workspace-bottom-728x90"
-          />
+          {/* LOCATION 1: Responsive Bottom Banner (320x50 Mobile / 728x90 Desktop) */}
+          <div className="flex justify-center md:hidden w-full">
+            <AdBanner
+              variant="mobile-banner"
+              adSlotId="workspace-bottom-mobile-320x50"
+            />
+          </div>
+          <div className="hidden md:flex justify-center w-full">
+            <AdBanner
+              variant="horizontal-banner"
+              adSlotId="workspace-bottom-728x90"
+            />
+          </div>
         </section>
       </main>
 

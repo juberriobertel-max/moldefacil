@@ -72,12 +72,12 @@ export default function DownloadAdModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/45 backdrop-blur-xs"
       role="dialog"
       aria-modal="true"
       aria-labelledby="download-modal-title"
     >
-      <div className="relative w-full max-w-lg rounded-3xl bg-white border border-slate-200 p-6 sm:p-7 shadow-2xl text-slate-800">
+      <div className="relative w-full max-w-lg rounded-3xl bg-white border border-slate-200 p-4 sm:p-7 shadow-2xl text-slate-800">
         <button
           type="button"
           onClick={onClose}
@@ -129,9 +129,9 @@ export default function DownloadAdModal({
           />
         </div>
 
-        {/* Center 336x280 Ad Space */}
-        <div className="mb-5">
-          <AdBanner variant="large-box" adSlotId="download-modal-336x280" />
+        {/* Center 300x250 Ad Space */}
+        <div className="mb-5 w-full flex justify-center">
+          <AdBanner variant="large-box" adSlotId="download-modal-300x250" />
         </div>
 
         {/* Action Button once countdown finishes */}
