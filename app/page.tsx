@@ -41,6 +41,7 @@ import { FashionStylePreset } from "@/lib/fashionStylesCatalog";
 import { DetectedGarmentConfig } from "@/lib/browserStyleDetector";
 import {
   DEFAULT_TRACING_PINS,
+  getDefaultPinsForCategory,
   solveTracingProportions,
 } from "@/lib/proportionSolver";
 import { computeTilingGrid, exportPatternToPdf } from "@/lib/pdfExporter";
@@ -48,6 +49,7 @@ import SmartGarmentScanner from "@/components/SmartGarmentScanner";
 import FashionStylesGallery from "@/components/FashionStylesGallery";
 import {
   GarmentExtrasSelector,
+  NecklineCollarSelector,
   QuickLengthSelector,
 } from "@/components/GarmentDetailsPanel";
 import PatternCanvas from "@/components/PatternCanvas";
@@ -236,8 +238,8 @@ export default function HomePage() {
 
   const tracingProportions = useMemo(() => {
     if (mode !== "scanner" || !pinsMoved) return null;
-    return solveTracingProportions(pins);
-  }, [mode, pinsMoved, pins]);
+    return solveTracingProportions(pins, category);
+  }, [mode, pinsMoved, pins, category]);
 
   const pattern = useMemo(
     () =>
@@ -478,6 +480,14 @@ export default function HomePage() {
                       setStyleVariant("default");
                       setActiveFashionStyleId(null);
                       setActivePieceId("all");
+                      setPins(getDefaultPinsForCategory(cat));
+                      setPinsMoved(false);
+                    }}
+                    topSubStyle={topSubStyle}
+                    onTopSubStyleChange={(sub) => {
+                      setTopSubStyle(sub);
+                      setActiveFashionStyleId(null);
+                      setActivePieceId("all");
                     }}
                     necklineStyle={necklineStyle}
                     onNecklineStyleChange={(st) => {
@@ -533,32 +543,49 @@ export default function HomePage() {
                         [
                           { id: "two_piece", label: "Conjunto (2 Piezas)" },
                           { id: "dress", label: "Vestido / Mono" },
-                          { id: "top", label: "Blusa / Chaqueta" },
-                          { id: "pants", label: "Pantalón / Short" },
+                          { id: "top", label: "Blusa / Camisa" },
+                          { id: "jacket", label: "Chaqueta / Blazer" },
                           { id: "skirt", label: "Falda" },
+                          { id: "pants", label: "Pantalón / Short" },
                         ] as const
-                      ).map((cat) => (
-                        <button
-                          key={cat.id}
-                          type="button"
-                          onClick={() => {
-                            setCategory(cat.id);
-                            setStyleVariant("default");
-                            setActiveFashionStyleId(null);
-                            setActivePieceId("all");
-                            setPinsMoved(false);
-                          }}
-                          className={`min-h-[48px] px-3 py-2.5 rounded-xl text-base font-semibold border transition cursor-pointer ${
-                            cat.id === "two_piece" ? "col-span-2" : ""
-                          } ${
-                            category === cat.id
-                              ? "bg-rose-600 text-white border-rose-600 shadow-sm"
-                              : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
-                          }`}
-                        >
-                          {cat.label}
-                        </button>
-                      ))}
+                      ).map((cat) => {
+                        const isSelected =
+                          cat.id === "jacket"
+                            ? category === "top" && topSubStyle === "jacket"
+                            : cat.id === "top"
+                              ? category === "top" && topSubStyle !== "jacket"
+                              : category === cat.id;
+
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => {
+                              const nextCat: GarmentCategory =
+                                cat.id === "jacket" ? "top" : cat.id;
+                              setCategory(nextCat);
+                              if (cat.id === "jacket") {
+                                setTopSubStyle("jacket");
+                                setNecklineStyle("tailored_lapel");
+                              } else if (cat.id === "top" && topSubStyle === "jacket") {
+                                setTopSubStyle("blouse");
+                              }
+                              setStyleVariant("default");
+                              setActiveFashionStyleId(null);
+                              setActivePieceId("all");
+                              setPins(getDefaultPinsForCategory(nextCat));
+                              setPinsMoved(false);
+                            }}
+                            className={`min-h-[48px] px-3 py-2.5 rounded-xl text-sm sm:text-base font-semibold border transition cursor-pointer ${
+                              isSelected
+                                ? "bg-rose-600 text-white border-rose-600 shadow-sm"
+                                : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:border-slate-300"
+                            }`}
+                          >
+                            {cat.label}
+                          </button>
+                        );
+                      })}
                     </div>
 
                     {/* Sub-style & Neckline */}
@@ -577,7 +604,7 @@ export default function HomePage() {
                           >
                             <option value="tshirt">Camiseta básica</option>
                             <option value="blouse">Blusa / Camisa</option>
-                            <option value="jacket">Chaqueta holgada</option>
+                            <option value="jacket">Chaqueta / Blazer</option>
                           </select>
                         )}
                         {category === "pants" && (
@@ -624,11 +651,13 @@ export default function HomePage() {
                           <div className="space-y-2.5">
                             <select
                               value={twoPieceTopStyle}
-                              onChange={(e) =>
-                                setTwoPieceTopStyle(
-                                  e.target.value as TwoPieceTopStyle
-                                )
-                              }
+                              onChange={(e) => {
+                                const nextTop = e.target.value as TwoPieceTopStyle;
+                                setTwoPieceTopStyle(nextTop);
+                                if (nextTop === "jacket_blazer") {
+                                  setNecklineStyle("tailored_lapel");
+                                }
+                              }}
                               className="w-full min-h-[48px] rounded-xl bg-[#FAF8F5] border border-slate-300 px-3 text-base text-slate-800"
                             >
                               <option value="crop_top">
@@ -636,6 +665,9 @@ export default function HomePage() {
                               </option>
                               <option value="waist_blouse">
                                 Arriba: Blusa a la cintura
+                              </option>
+                              <option value="jacket_blazer">
+                                Arriba: Chaqueta / Blazer
                               </option>
                             </select>
                             <select
@@ -666,34 +698,11 @@ export default function HomePage() {
                         category === "dress" ||
                         category === "two_piece") && (
                         <>
-                          <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                              Forma del escote
-                            </label>
-                            <div className="grid grid-cols-2 gap-2">
-                              {(
-                                [
-                                  { id: "round", label: "Redondo" },
-                                  { id: "v_neck", label: "En V" },
-                                  { id: "square", label: "Cuadrado" },
-                                  { id: "high", label: "Alto / Cerrado" },
-                                ] as const
-                              ).map((nk) => (
-                                <button
-                                  key={nk.id}
-                                  type="button"
-                                  onClick={() => setNecklineStyle(nk.id)}
-                                  className={`min-h-[48px] rounded-xl text-base font-semibold border transition cursor-pointer ${
-                                    necklineStyle === nk.id
-                                      ? "bg-teal-600 text-white border-teal-600"
-                                      : "bg-[#FAF8F5] text-slate-700 border-slate-200 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  {nk.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                          <NecklineCollarSelector
+                            heading="Cuello, Escote o Solapa"
+                            necklineStyle={necklineStyle}
+                            onNecklineStyleChange={setNecklineStyle}
+                          />
 
                           <div>
                             <label className="block text-sm font-semibold text-slate-700 mb-1.5">
@@ -762,7 +771,9 @@ export default function HomePage() {
                     Paso 2: Pon tus medidas (en cm)
                   </h2>
                   <p className="text-sm text-slate-500">
-                    Busto {measurements.bust} • Cintura {measurements.waist} • Cadera {measurements.hip} cm
+                    {category === "pants" || category === "skirt"
+                      ? `Cintura ${measurements.waist} • Cadera ${measurements.hip} cm`
+                      : `Busto ${measurements.bust} • Cintura ${measurements.waist} • Cadera ${measurements.hip} cm`}
                   </p>
                 </div>
               </div>

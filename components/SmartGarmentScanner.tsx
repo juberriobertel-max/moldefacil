@@ -10,18 +10,20 @@ import {
   QuickLengthPreset,
   SkirtSubStyle,
   SleeveStyle,
+  TopSubStyle,
   TorsoFit,
   TracingPins,
   TwoPieceBottomStyle,
   TwoPieceTopStyle,
 } from "@/lib/types";
-import { DEFAULT_TRACING_PINS } from "@/lib/proportionSolver";
+import { getDefaultPinsForCategory } from "@/lib/proportionSolver";
 import {
   DetectedGarmentConfig,
   detectFashionStyleInBrowser,
 } from "@/lib/browserStyleDetector";
 import {
   GarmentExtrasSelector,
+  NecklineCollarSelector,
   QuickLengthSelector,
 } from "@/components/GarmentDetailsPanel";
 
@@ -30,6 +32,8 @@ interface SmartGarmentScannerProps {
   onPinsChange: (pins: TracingPins) => void;
   category: GarmentCategory;
   onCategoryChange: (cat: GarmentCategory) => void;
+  topSubStyle: TopSubStyle;
+  onTopSubStyleChange: (style: TopSubStyle) => void;
   necklineStyle: NecklineStyle;
   onNecklineStyleChange: (style: NecklineStyle) => void;
   sleeveStyle: SleeveStyle;
@@ -61,9 +65,29 @@ interface PinConfig {
   labelSide?: "left" | "right";
 }
 
-const ONE_PIECE_PINS: PinConfig[] = [
+const PANTS_PINS: PinConfig[] = [
+  { key: "waist", label: "Cintura", color: "#0284C7", num: 1, labelSide: "left" },
+  { key: "hip", label: "Cadera", color: "#7C3AED", num: 2, labelSide: "left" },
+  { key: "crotch", label: "Tiro (Entrepierna)", color: "#E11D48", num: 3, labelSide: "right" },
+  { key: "hem", label: "Largo Bota", color: "#0D9488", num: 4, labelSide: "left" },
+];
+
+const SKIRT_PINS: PinConfig[] = [
+  { key: "waist", label: "Cintura", color: "#0284C7", num: 1, labelSide: "left" },
+  { key: "hip", label: "Cadera", color: "#7C3AED", num: 2, labelSide: "left" },
+  { key: "hem", label: "Largo Ruedo", color: "#0D9488", num: 3, labelSide: "left" },
+];
+
+const TOP_PINS: PinConfig[] = [
   { key: "shoulder", label: "Hombro", color: "#D97706", num: 1, labelSide: "left" },
-  { key: "neckline", label: "Escote", color: "#E11D48", num: 2, labelSide: "right" },
+  { key: "neckline", label: "Cuello / Escote", color: "#E11D48", num: 2, labelSide: "right" },
+  { key: "armhole", label: "Sisa", color: "#0284C7", num: 3, labelSide: "left" },
+  { key: "hem", label: "Largo Cintura/Cadera", color: "#0D9488", num: 4, labelSide: "left" },
+];
+
+const DRESS_PINS: PinConfig[] = [
+  { key: "shoulder", label: "Hombro", color: "#D97706", num: 1, labelSide: "left" },
+  { key: "neckline", label: "Cuello / Escote", color: "#E11D48", num: 2, labelSide: "right" },
   { key: "waist", label: "Cintura", color: "#0284C7", num: 3, labelSide: "right" },
   { key: "hip", label: "Cadera", color: "#7C3AED", num: 4, labelSide: "right" },
   { key: "hem", label: "Largo Ruedo", color: "#0D9488", num: 5, labelSide: "right" },
@@ -71,7 +95,7 @@ const ONE_PIECE_PINS: PinConfig[] = [
 
 const TWO_PIECE_PINS: PinConfig[] = [
   { key: "shoulder", label: "Hombro", color: "#D97706", num: 1, labelSide: "left" },
-  { key: "neckline", label: "Escote", color: "#E11D48", num: 2, labelSide: "right" },
+  { key: "neckline", label: "Cuello / Escote", color: "#E11D48", num: 2, labelSide: "right" },
   { key: "topEnd", label: "Fin del Top", color: "#EA580C", num: 3, labelSide: "right" },
   {
     key: "bottomStart",
@@ -81,8 +105,24 @@ const TWO_PIECE_PINS: PinConfig[] = [
     labelSide: "right",
   },
   { key: "hip", label: "Cadera", color: "#7C3AED", num: 5, labelSide: "right" },
-  { key: "hem", label: "Largo Ruedo", color: "#0D9488", num: 6, labelSide: "right" },
+  { key: "hem", label: "Largo Bota/Ruedo", color: "#0D9488", num: 6, labelSide: "right" },
 ];
+
+function getPinsForCategory(cat: GarmentCategory): PinConfig[] {
+  switch (cat) {
+    case "pants":
+      return PANTS_PINS;
+    case "skirt":
+      return SKIRT_PINS;
+    case "top":
+      return TOP_PINS;
+    case "two_piece":
+      return TWO_PIECE_PINS;
+    case "dress":
+    default:
+      return DRESS_PINS;
+  }
+}
 
 function createSamplePhoto(
   kind: "dress" | "pants" | "blouse" | "two_piece"
@@ -176,7 +216,16 @@ function createSamplePhoto(
 }
 
 /* ---------- Minimalist Schematic SVG Icons for Part Cards ---------- */
-function GarmentIcon({ type }: { type: GarmentCategory }) {
+function GarmentIcon({ type }: { type: GarmentCategory | "jacket" }) {
+  if (type === "jacket") {
+    return (
+      <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+        <path d="M14 6 L6 11 L4 24 L9 25 L11 16 L11 34 L29 34 L29 16 L31 25 L36 24 L34 11 L26 6" />
+        <path d="M14 6 L17 14 L14 16 L20 22 L20 34" />
+        <path d="M26 6 L23 14 L26 16 L20 22" />
+      </svg>
+    );
+  }
   if (type === "top") {
     return (
       <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round">
@@ -211,19 +260,6 @@ function GarmentIcon({ type }: { type: GarmentCategory }) {
   return (
     <svg viewBox="0 0 40 40" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round">
       <path d="M12 7 L28 7 L30 34 L22 34 L20 18 L18 34 L10 34 Z" />
-    </svg>
-  );
-}
-
-function NecklineIcon({ style }: { style: NecklineStyle }) {
-  return (
-    <svg viewBox="0 0 40 32" className="w-8 h-7 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round">
-      <path d="M4 28 L4 9 L12 6" />
-      <path d="M28 6 L36 9 L36 28" />
-      {style === "round" && <path d="M12 6 C15 17, 25 17, 28 6" />}
-      {style === "v_neck" && <path d="M12 6 L20 20 L28 6" />}
-      {style === "square" && <path d="M12 6 L12 16 L28 16 L28 6" />}
-      {style === "high" && <path d="M12 6 C16 9, 24 9, 28 6" />}
     </svg>
   );
 }
@@ -280,6 +316,8 @@ export default function SmartGarmentScanner({
   onPinsChange,
   category,
   onCategoryChange,
+  topSubStyle,
+  onTopSubStyleChange,
   necklineStyle,
   onNecklineStyleChange,
   sleeveStyle,
@@ -315,14 +353,14 @@ export default function SmartGarmentScanner({
   const analysisSeqRef = useRef(0);
 
   const isTwoPiece = category === "two_piece";
-  const activePins = isTwoPiece ? TWO_PIECE_PINS : ONE_PIECE_PINS;
+  const activePins = getPinsForCategory(category);
 
   const detectedBadges = (() => {
     const badges: string[] = [];
     const catLabels: Record<GarmentCategory, string> = {
       dress: "Vestido",
       two_piece: "Conjunto 2 Piezas",
-      top: "Blusa",
+      top: topSubStyle === "jacket" ? "Chaqueta / Blazer" : "Blusa / Camisa",
       skirt: "Falda",
       pants: "Pantalón",
     };
@@ -337,6 +375,8 @@ export default function SmartGarmentScanner({
           round: "Escote Redondo",
           square: "Escote Cuadrado",
           high: "Cuello Alto",
+          tailored_lapel: "Solapa Sastre",
+          shirt_collar: "Cuello Camisero",
         };
         badges.push(nkMap[necklineStyle]);
       }
@@ -358,6 +398,7 @@ export default function SmartGarmentScanner({
     if (extras.hemRuffle) badges.push("Con Bolero / Volante");
     if (extras.flaredSleeve) badges.push("Manga Acampanada");
     if (extras.sidePockets) badges.push("Con Bolsillos");
+    if (extras.flapPockets) badges.push("Bolsillos con Solapa");
     return badges;
   })();
 
@@ -531,13 +572,19 @@ export default function SmartGarmentScanner({
           <div className="rounded-xl bg-teal-50 border border-teal-200 p-3 text-sm text-teal-900 leading-snug">
             {isTwoPiece
               ? "Modo 2 Piezas: marca hasta dónde llega el Top (3) y dónde empieza la Falda o Pantalón (4)."
-              : "Mueve los 5 círculos sobre tu foto. El molde de la derecha cambiará al instante."}
+              : category === "pants"
+                ? "Modo Pantalón: ubica Cintura (1), Cadera (2), Tiro/Entrepierna (3) y Largo Bota (4)."
+                : category === "skirt"
+                  ? "Modo Falda: ubica Cintura (1), Cadera (2) y Largo Ruedo (3)."
+                  : category === "top"
+                    ? "Modo Parte Superior: ubica Hombro (1), Cuello (2), Sisa (3) y Largo (4)."
+                    : "Mueve los 5 círculos sobre tu foto. El molde de la derecha cambiará al instante."}
           </div>
 
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
-              onClick={() => onPinsChange(DEFAULT_TRACING_PINS)}
+              onClick={() => onPinsChange(getDefaultPinsForCategory(category))}
               className="text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-slate-200 cursor-pointer"
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -617,10 +664,10 @@ export default function SmartGarmentScanner({
                     stroke="rgba(15, 23, 42, 0.55)"
                     strokeWidth="0.7"
                     strokeDasharray="2 1.5"
-                    points={["shoulder", "neckline", "waist", "hip", "hem"]
+                    points={activePins
                       .map(
-                        (k) =>
-                          `${pins[k as PinKey].x * 100},${pins[k as PinKey].y * 100}`
+                        (cfg) =>
+                          `${pins[cfg.key].x * 100},${pins[cfg.key].y * 100}`
                       )
                       .join(" ")}
                   />
@@ -711,7 +758,7 @@ export default function SmartGarmentScanner({
           ¿Cómo es la prenda de la foto?
         </h3>
 
-        {/* Prenda (including Conjunto 2 Piezas) */}
+        {/* Prenda (including Conjunto 2 Piezas y Chaqueta / Blazer) */}
         <div className="space-y-1.5">
           <span className="block text-sm font-bold text-slate-700">
             1. Tipo de prenda
@@ -722,28 +769,51 @@ export default function SmartGarmentScanner({
                 { id: "two_piece", label: "Conjunto (2 Piezas)" },
                 { id: "dress", label: "Vestido" },
                 { id: "top", label: "Blusa / Camisa" },
+                { id: "jacket", label: "Chaqueta / Blazer" },
                 { id: "skirt", label: "Falda" },
                 { id: "pants", label: "Pantalón" },
               ] as const
-            ).map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onCategoryChange(item.id)}
-                className={`min-h-[60px] p-2.5 rounded-2xl border-2 flex items-center gap-2 text-left transition cursor-pointer ${
-                  item.id === "two_piece" ? "col-span-2" : ""
-                } ${
-                  category === item.id
-                    ? "bg-rose-50 border-rose-600 text-rose-900 shadow-2xs"
-                    : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
-                }`}
-              >
-                <GarmentIcon type={item.id} />
-                <span className="text-sm font-bold leading-tight">
-                  {item.label}
-                </span>
-              </button>
-            ))}
+            ).map((item) => {
+              const isSelected =
+                item.id === "jacket"
+                  ? category === "top" && topSubStyle === "jacket"
+                  : item.id === "top"
+                    ? category === "top" && topSubStyle !== "jacket"
+                    : category === item.id;
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    if (item.id === "jacket") {
+                      onCategoryChange("top");
+                      onTopSubStyleChange("jacket");
+                      onNecklineStyleChange("tailored_lapel");
+                    } else if (item.id === "top") {
+                      onCategoryChange("top");
+                      if (topSubStyle === "jacket") {
+                        onTopSubStyleChange("blouse");
+                      }
+                    } else {
+                      onCategoryChange(item.id);
+                    }
+                  }}
+                  className={`min-h-[60px] p-2.5 rounded-2xl border-2 flex items-center gap-2 text-left transition cursor-pointer ${
+                    item.id === "two_piece" || item.id === "dress" ? "" : ""
+                  } ${
+                    isSelected
+                      ? "bg-rose-50 border-rose-600 text-rose-900 shadow-2xs"
+                      : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
+                  }`}
+                >
+                  <GarmentIcon type={item.id} />
+                  <span className="text-sm font-bold leading-tight">
+                    {item.label}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -759,13 +829,21 @@ export default function SmartGarmentScanner({
                   [
                     { id: "crop_top", label: "Top corto (Crop top)" },
                     { id: "waist_blouse", label: "Blusa a la cintura" },
+                    { id: "jacket_blazer", label: "Chaqueta / Blazer" },
                   ] as const
                 ).map((opt) => (
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => onTwoPieceTopStyleChange(opt.id)}
+                    onClick={() => {
+                      onTwoPieceTopStyleChange(opt.id);
+                      if (opt.id === "jacket_blazer") {
+                        onNecklineStyleChange("tailored_lapel");
+                      }
+                    }}
                     className={`min-h-[48px] px-2.5 py-2 rounded-xl border-2 text-xs sm:text-sm font-bold transition cursor-pointer ${
+                      opt.id === "jacket_blazer" ? "col-span-2" : ""
+                    } ${
                       twoPieceTopStyle === opt.id
                         ? "bg-teal-600 text-white border-teal-600"
                         : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
@@ -808,41 +886,15 @@ export default function SmartGarmentScanner({
           </div>
         )}
 
-        {/* Escote (Blusa, Vestido, Conjunto) */}
+        {/* Cuello, Escote o Solapa (oculto en Pantalón y Falda) */}
         {(category === "top" ||
           category === "dress" ||
           category === "two_piece") && (
-          <div className="space-y-1.5">
-            <span className="block text-sm font-bold text-slate-700">
-              2. Forma del escote
-            </span>
-            <div className="grid grid-cols-2 gap-2">
-              {(
-                [
-                  { id: "round", label: "Redondo" },
-                  { id: "v_neck", label: "En V" },
-                  { id: "square", label: "Cuadrado" },
-                  { id: "high", label: "Alto / Cerrado" },
-                ] as const
-              ).map((nk) => (
-                <button
-                  key={nk.id}
-                  type="button"
-                  onClick={() => onNecklineStyleChange(nk.id)}
-                  className={`min-h-[56px] p-2.5 rounded-2xl border-2 flex items-center gap-2 text-left transition cursor-pointer ${
-                    necklineStyle === nk.id
-                      ? "bg-teal-50 border-teal-600 text-teal-900 shadow-2xs"
-                      : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
-                  }`}
-                >
-                  <NecklineIcon style={nk.id} />
-                  <span className="text-sm font-bold leading-tight">
-                    {nk.label}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <NecklineCollarSelector
+            heading="2. Cuello, Escote o Solapa"
+            necklineStyle={necklineStyle}
+            onNecklineStyleChange={onNecklineStyleChange}
+          />
         )}
 
         {/* Mangas (Blusa, Vestido, Conjunto) */}
