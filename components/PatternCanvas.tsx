@@ -318,6 +318,55 @@ export default function PatternCanvas({
                   />
                 )}
 
+                {/* Internal darts, lapel fold/break lines, and pocket placement boxes */}
+                {piece.internalLines?.map((line, idx) => {
+                  const strokeColor =
+                    line.style === "dart"
+                      ? "#7C3AED"
+                      : line.style === "fold"
+                        ? "#E11D48"
+                        : "#0284C7";
+                  const dashArray =
+                    line.style === "dart"
+                      ? undefined
+                      : line.style === "fold"
+                        ? "1.1 0.45"
+                        : "0.75 0.45";
+                  return (
+                    <g key={`internal-${idx}`}>
+                      <path
+                        d={commandsToSvgPath(line.commands)}
+                        fill={
+                          line.style === "dart"
+                            ? "rgba(124, 58, 237, 0.08)"
+                            : "none"
+                        }
+                        stroke={strokeColor}
+                        strokeWidth={line.style === "dart" ? "0.22" : "0.2"}
+                        strokeDasharray={dashArray}
+                        strokeLinejoin="round"
+                      />
+                      {line.label && line.labelPos && (
+                        <text
+                          x={line.labelPos.x}
+                          y={line.labelPos.y}
+                          fill={strokeColor}
+                          fontSize="0.95"
+                          fontWeight="700"
+                          textAnchor="middle"
+                          transform={
+                            line.style === "dart"
+                              ? `rotate(-90, ${line.labelPos.x}, ${line.labelPos.y})`
+                              : undefined
+                          }
+                        >
+                          {line.label}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+
                 {/* Grainline */}
                 <line
                   x1={piece.grainline.x1}

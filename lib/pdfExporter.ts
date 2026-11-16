@@ -652,6 +652,64 @@ export function exportPatternToPdf(options: ExportPdfOptions): {
         doc.setLineDashPattern([], 0);
       }
 
+      if (piece.internalLines && piece.internalLines.length > 0) {
+        for (const internalLine of piece.internalLines) {
+          if (internalLine.style === "dart") {
+            doc.setDrawColor(124, 58, 237);
+            doc.setLineWidth(0.32);
+            doc.setLineDashPattern([], 0);
+          } else if (internalLine.style === "fold") {
+            doc.setDrawColor(225, 29, 72);
+            doc.setLineWidth(0.3);
+            doc.setLineDashPattern([3, 1.5], 0);
+          } else {
+            doc.setDrawColor(2, 132, 199);
+            doc.setLineWidth(0.28);
+            doc.setLineDashPattern([2, 1.5], 0);
+          }
+          drawVectorPath(
+            doc,
+            internalLine.commands,
+            pieceOffsetXmm,
+            pieceOffsetYmm,
+            10,
+            "stroke"
+          );
+          doc.setLineDashPattern([], 0);
+
+          if (internalLine.label && internalLine.labelPos) {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(6.8);
+            doc.setTextColor(
+              internalLine.style === "dart"
+                ? 109
+                : internalLine.style === "fold"
+                  ? 190
+                  : 3,
+              internalLine.style === "dart"
+                ? 40
+                : internalLine.style === "fold"
+                  ? 18
+                  : 105,
+              internalLine.style === "dart"
+                ? 217
+                : internalLine.style === "fold"
+                  ? 60
+                  : 161
+            );
+            doc.text(
+              internalLine.label,
+              pieceOffsetXmm + internalLine.labelPos.x * 10,
+              pieceOffsetYmm + internalLine.labelPos.y * 10,
+              {
+                align: "center",
+                angle: internalLine.style === "dart" ? 90 : 0,
+              }
+            );
+          }
+        }
+      }
+
       const gx1 = pieceOffsetXmm + piece.grainline.x1 * 10;
       const gy1 = pieceOffsetYmm + piece.grainline.y1 * 10;
       const gx2 = pieceOffsetXmm + piece.grainline.x2 * 10;

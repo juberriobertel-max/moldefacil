@@ -5,6 +5,7 @@ import { Check } from "lucide-react";
 import {
   GarmentCategory,
   GarmentExtras,
+  NecklineStyle,
   QuickLengthPreset,
   SleeveStyle,
 } from "@/lib/types";
@@ -40,6 +41,11 @@ const EXTRA_CARDS: ExtraCardDef[] = [
     key: "sidePockets",
     title: "Bolsillos Laterales",
     desc: "+ 4 bolsas y piquetes",
+  },
+  {
+    key: "flapPockets",
+    title: "Bolsillos con Solapa",
+    desc: "+ Tapetas y bolsas sastre",
   },
 ];
 
@@ -81,7 +87,101 @@ function ExtraIcon({ type }: { type: keyof GarmentExtras }) {
           <path d="M26 13 C21 14, 20 19, 22 23 C24 25, 26 24, 27 21" />
         </svg>
       );
+    case "flapPockets":
+      return (
+        <svg viewBox="0 0 36 36" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+          <path d="M7 10 L29 10 L29 16 L26.5 18 L9.5 18 L7 16 Z" />
+          <path d="M9 18 L9 29 L27 29 L27 18" />
+        </svg>
+      );
   }
+}
+
+export function NecklineIcon({ style }: { style: NecklineStyle }) {
+  return (
+    <svg viewBox="0 0 40 32" className="w-8 h-7 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+      <path d="M4 28 L4 9 L12 6" />
+      <path d="M28 6 L36 9 L36 28" />
+      {style === "round" && <path d="M12 6 C15 17, 25 17, 28 6" />}
+      {style === "v_neck" && <path d="M12 6 L20 20 L28 6" />}
+      {style === "square" && <path d="M12 6 L12 16 L28 16 L28 6" />}
+      {style === "high" && <path d="M12 6 C16 9, 24 9, 28 6" />}
+      {style === "tailored_lapel" && (
+        <>
+          <path d="M12 6 L16 11 L13 13 L20 22 L20 28" />
+          <path d="M28 6 L24 11 L27 13 L20 22" />
+          <path d="M12 6 C16 8, 24 8, 28 6" />
+        </>
+      )}
+      {style === "shirt_collar" && (
+        <>
+          <path d="M12 6 L14 14 L20 10 L26 14 L28 6" />
+          <path d="M12 6 C16 9, 24 9, 28 6" />
+          <line x1="20" y1="10" x2="20" y2="28" strokeDasharray="2 2" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+export function NecklineCollarSelector({
+  necklineStyle,
+  onNecklineStyleChange,
+  heading = "Cuello, Escote o Solapa",
+}: {
+  necklineStyle: NecklineStyle;
+  onNecklineStyleChange: (style: NecklineStyle) => void;
+  heading?: string;
+}) {
+  const openNecklines: { id: NecklineStyle; label: string }[] = [
+    { id: "round", label: "Redondo" },
+    { id: "v_neck", label: "En V" },
+    { id: "square", label: "Cuadrado" },
+    { id: "high", label: "Alto / Cerrado" },
+  ];
+
+  const structuredCollars: { id: NecklineStyle; label: string }[] = [
+    { id: "tailored_lapel", label: "Solapa Sastre (Blazer)" },
+    { id: "shirt_collar", label: "Cuello Camisero" },
+  ];
+
+  const renderGroup = (
+    title: string,
+    items: { id: NecklineStyle; label: string }[]
+  ) => (
+    <div className="space-y-1.5">
+      <span className="block text-xs font-bold uppercase tracking-wide text-slate-500">
+        {title}
+      </span>
+      <div className="grid grid-cols-2 gap-2">
+        {items.map((nk) => (
+          <button
+            key={nk.id}
+            type="button"
+            onClick={() => onNecklineStyleChange(nk.id)}
+            className={`min-h-[54px] p-2.5 rounded-2xl border-2 flex items-center gap-2 text-left transition cursor-pointer ${
+              necklineStyle === nk.id
+                ? "bg-teal-50 border-teal-600 text-teal-900 shadow-2xs"
+                : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
+            }`}
+          >
+            <NecklineIcon style={nk.id} />
+            <span className="text-xs sm:text-sm font-bold leading-tight">
+              {nk.label}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <span className="block text-sm font-bold text-slate-700">{heading}</span>
+      {renderGroup("Escotes abiertos", openNecklines)}
+      {renderGroup("Cuellos y Solapas estructurados", structuredCollars)}
+    </div>
+  );
 }
 
 export function QuickLengthSelector({
@@ -176,6 +276,9 @@ export function GarmentExtrasSelector({
     }
     if (key === "hemRuffle") {
       return category !== "pants";
+    }
+    if (key === "flapPockets") {
+      return category !== "skirt";
     }
     return true;
   };

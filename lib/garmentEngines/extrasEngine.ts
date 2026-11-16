@@ -2,6 +2,7 @@ import {
   GarmentCategory,
   Measurements,
   PathCommand,
+  PatternInternalLine,
   PatternNotch,
   PatternPiece,
   QuickLengthPreset,
@@ -835,4 +836,402 @@ export function buildShirtDressDetailPieces(params: {
   );
 
   return [collarPiece, placketPiece];
+}
+
+/**
+ * Generates an elongated diamond vertical waist dart ("pinza vertical de entalle")
+ * inside Front and Back tailored pieces for structured shaping.
+ */
+export function buildVerticalWaistDart(params: {
+  centerX: number;
+  topY: number;
+  waistY: number;
+  botY: number;
+  halfWidthCm?: number;
+  label?: string;
+}): PatternInternalLine {
+  const {
+    centerX,
+    topY,
+    waistY,
+    botY,
+    halfWidthCm = 1.4,
+    label = "Pinza entalle",
+  } = params;
+  const cx = Number(centerX.toFixed(2));
+  const ty = Number(topY.toFixed(2));
+  const wy = Number(waistY.toFixed(2));
+  const by = Number(botY.toFixed(2));
+
+  return {
+    commands: [
+      { type: "M", x: cx, y: ty },
+      { type: "L", x: cx + halfWidthCm, y: wy },
+      { type: "L", x: cx, y: by },
+      { type: "L", x: cx - halfWidthCm, y: wy },
+      { type: "Z" },
+      { type: "M", x: cx, y: ty },
+      { type: "L", x: cx, y: by },
+    ],
+    style: "dart",
+    label,
+    labelPos: { x: cx, y: wy },
+  };
+}
+
+/**
+ * Builds notched lapel & button-overlap front contour + break line + button notches
+ * for Blazer / Chaqueta / Solapa Sastre patterns.
+ */
+export function buildTailoredLapelFrontGeometry(params: {
+  neckW: number;
+  frontNeckDrop: number;
+  armholeDepth: number;
+  bodiceLen: number;
+  totalLen: number;
+}): {
+  buttonOverlap: number;
+  breakY: number;
+  gorgeX: number;
+  gorgeY: number;
+  lapelPeakX: number;
+  lapelPeakY: number;
+  lapelNotchInX: number;
+  lapelNotchInY: number;
+  closingCommands: PathCommand[];
+  internalLines: PatternInternalLine[];
+  notches: PatternNotch[];
+} {
+  const { neckW, frontNeckDrop, armholeDepth, bodiceLen, totalLen } = params;
+  const buttonOverlap = 2.8;
+  const breakY = Number(
+    Math.min(totalLen - 10, Math.max(armholeDepth + 4, bodiceLen * 0.84)).toFixed(2)
+  );
+  const gorgeX = Number((neckW * 0.45).toFixed(2));
+  const gorgeY = Number(Math.max(4.5, frontNeckDrop * 0.48).toFixed(2));
+  const lapelPeakX = Number((-(buttonOverlap + 5.6)).toFixed(2));
+  const lapelPeakY = Number((gorgeY + 2.4).toFixed(2));
+  const lapelNotchInX = Number((-(buttonOverlap + 1.8)).toFixed(2));
+  const lapelNotchInY = Number((gorgeY + 0.8).toFixed(2));
+  const collarNotchOutX = Number((-(buttonOverlap + 3.4)).toFixed(2));
+  const collarNotchOutY = Number((Math.max(1.2, gorgeY - 1.2)).toFixed(2));
+
+  // Goes from hem -> front overlap edge -> break point -> notched lapel -> neck point (neckW, 0)
+  const closingCommands: PathCommand[] = [
+    { type: "L", x: -buttonOverlap, y: totalLen },
+    { type: "L", x: -buttonOverlap, y: breakY },
+    { type: "L", x: lapelPeakX, y: lapelPeakY },
+    { type: "L", x: lapelNotchInX, y: lapelNotchInY },
+    { type: "L", x: collarNotchOutX, y: collarNotchOutY },
+    { type: "L", x: gorgeX, y: gorgeY },
+    { type: "L", x: neckW, y: 0 },
+  ];
+
+  const internalLines: PatternInternalLine[] = [
+    {
+      commands: [
+        { type: "M", x: Number((neckW - 1.2).toFixed(2)), y: 0.4 },
+        { type: "L", x: -buttonOverlap, y: breakY },
+      ],
+      style: "fold",
+      label: "Línea de quiebre",
+      labelPos: {
+        x: Number(((neckW - buttonOverlap) * 0.45).toFixed(2)),
+        y: Number((breakY * 0.5).toFixed(2)),
+      },
+    },
+    {
+      commands: [
+        { type: "M", x: 0, y: breakY },
+        { type: "L", x: 0, y: totalLen },
+      ],
+      style: "mark",
+      label: "Centro",
+      labelPos: { x: 0.8, y: Number(((breakY + totalLen) * 0.5).toFixed(2)) },
+    },
+  ];
+
+  const button2Y = Number(
+    Math.min(totalLen - 5, breakY + Math.max(8, (totalLen - breakY) * 0.42)).toFixed(1)
+  );
+  const notches: PatternNotch[] = [
+    { x: 0, y: breakY, angle: 180, label: "Quiebre / Botón 1" },
+    { x: 0, y: button2Y, angle: 180, label: "Botón 2" },
+  ];
+
+  return {
+    buttonOverlap,
+    breakY,
+    gorgeX,
+    gorgeY,
+    lapelPeakX,
+    lapelPeakY,
+    lapelNotchInX,
+    lapelNotchInY,
+    closingCommands,
+    internalLines,
+    notches,
+  };
+}
+
+/**
+ * Builds Upper Tailored Collar, Under Tailored Collar, and Lapel Facing pieces
+ * for Chaqueta / Blazer and Solapa Sastre garments.
+ */
+export function buildTailoredCollarAndFacingPieces(params: {
+  neckW: number;
+  shoulderX: number;
+  shoulderSlope: number;
+  frontNeckDrop: number;
+  armholeDepth: number;
+  bodiceLen: number;
+  totalLen: number;
+  seamAllowance: SeamAllowance;
+}): PatternPiece[] {
+  const {
+    neckW,
+    shoulderX,
+    shoulderSlope,
+    frontNeckDrop,
+    armholeDepth,
+    bodiceLen,
+    totalLen,
+    seamAllowance,
+  } = params;
+
+  const halfCollar = Number(Math.max(18, neckW * 3.1).toFixed(1));
+  const collarH = 7.8;
+
+  const buildCollar = (isUpper: boolean): PatternPiece => {
+    const scaleDelta = isUpper ? 0 : -0.35;
+    const h = Number((collarH + scaleDelta).toFixed(2));
+    const tipX = Number((halfCollar + 2.8 + scaleDelta).toFixed(2));
+    const seam: PathCommand[] = [
+      { type: "M", x: 0, y: 1.6 },
+      {
+        type: "C",
+        cp1x: halfCollar * 0.42,
+        cp1y: 1.4,
+        cp2x: halfCollar * 0.78,
+        cp2y: 0.6,
+        x: halfCollar,
+        y: 0,
+      },
+      { type: "L", x: tipX, y: h + 1.1 },
+      {
+        type: "C",
+        cp1x: halfCollar * 0.68,
+        cp1y: h + 0.5,
+        cp2x: halfCollar * 0.32,
+        cp2y: h + 0.15,
+        x: 0,
+        y: h,
+      },
+      { type: "Z" },
+    ];
+
+    return normalizePiece(
+      {
+        id: isUpper ? "tailored_collar_top" : "tailored_collar_under",
+        name: isUpper
+          ? "CUELLO SASTRE SUPERIOR (x1 doblez)"
+          : "CUELLO SASTRE INFERIOR (x1 doblez)",
+        subtitle: isUpper
+          ? "Cortar 1 pieza al doblez (tela exterior)"
+          : "Cortar 1 pieza al doblez (bajo cuello / entretela)",
+        tabLabel: isUpper ? "Cuello Sup." : "Cuello Inf.",
+        seamPath: seam,
+        grainline: { x1: 3, y1: h * 0.56, x2: halfCollar - 2, y2: h * 0.56 },
+        notches: [
+          { x: 0, y: h, angle: 90, label: "Centro espalda" },
+          { x: halfCollar * 0.52, y: 1.0, angle: -90, label: "Hombro" },
+        ],
+        internalLines: [
+          {
+            commands: [
+              { type: "M", x: 0, y: 3.1 },
+              { type: "L", x: halfCollar + 0.8, y: 2.3 },
+            ],
+            style: "fold",
+            label: "Quiebre cuello",
+            labelPos: { x: halfCollar * 0.5, y: 2.7 },
+          },
+        ],
+        labelPos: { x: halfCollar * 0.5, y: h * 0.58 },
+        labelAngle: 0,
+        labelMaxSpanCm: halfCollar - 3,
+        labelBandWidthCm: h,
+        foldLine: { x1: 0, y1: 1.6, x2: 0, y2: h },
+      },
+      seamAllowance
+    );
+  };
+
+  // Vista de Solapa matching exact lapel contour + 5.5 cm interior facing width
+  const lapel = buildTailoredLapelFrontGeometry({
+    neckW,
+    frontNeckDrop,
+    armholeDepth,
+    bodiceLen,
+    totalLen,
+  });
+  const facingInnerW = 5.5;
+  const shDist = Math.max(4, shoulderX - neckW);
+  const shFaceT = Math.min(0.65, 4.5 / shDist);
+  const shFaceX = Number((neckW + shDist * shFaceT).toFixed(2));
+  const shFaceY = Number((shoulderSlope * shFaceT).toFixed(2));
+
+  const facingSeam: PathCommand[] = [
+    { type: "M", x: neckW, y: 0 },
+    { type: "L", x: shFaceX, y: shFaceY },
+    {
+      type: "C",
+      cp1x: facingInnerW + 2.5,
+      cp1y: armholeDepth * 0.55,
+      cp2x: facingInnerW,
+      cp2y: bodiceLen * 0.72,
+      x: facingInnerW,
+      y: totalLen,
+    },
+    ...lapel.closingCommands,
+    { type: "Z" },
+  ];
+
+  const lapelFacingPiece = normalizePiece(
+    {
+      id: "lapel_facing",
+      name: "VISTA DE SOLAPA (x2)",
+      subtitle: "Cortar 2 piezas (aplicar entretela)",
+      tabLabel: "Vista de Solapa",
+      seamPath: facingSeam,
+      grainline: {
+        x1: 1.2,
+        y1: Math.max(8, lapel.gorgeY + 5),
+        x2: 1.2,
+        y2: totalLen - 6,
+      },
+      notches: [
+        { x: neckW, y: 0, angle: -90, label: "Hombro" },
+        { x: -lapel.buttonOverlap, y: lapel.breakY, angle: 180, label: "Quiebre" },
+      ],
+      labelPos: { x: 1.2, y: totalLen * 0.56 },
+      labelAngle: -90,
+      labelMaxSpanCm: Math.max(16, totalLen - 14),
+      labelBandWidthCm: facingInnerW + lapel.buttonOverlap,
+    },
+    seamAllowance
+  );
+
+  return [buildCollar(true), buildCollar(false), lapelFacingPiece];
+}
+
+/**
+ * Generates rectangular flap pocket placement outline for front pattern pieces.
+ */
+export function createFlapPocketMarkLine(params: {
+  xStart: number;
+  yTop: number;
+  widthCm?: number;
+}): PatternInternalLine {
+  const { xStart, yTop, widthCm = 13.5 } = params;
+  const x1 = Number(xStart.toFixed(2));
+  const x2 = Number((xStart + widthCm).toFixed(2));
+  const y1 = Number(yTop.toFixed(2));
+  const y2 = Number((yTop + 2.0).toFixed(2));
+
+  return {
+    commands: [
+      { type: "M", x: x1, y: y1 },
+      { type: "L", x: x2, y: y1 },
+      { type: "L", x: x2, y: y2 },
+      { type: "L", x: x1, y: y2 },
+      { type: "Z" },
+    ],
+    style: "mark",
+    label: "Bolsillo con solapa",
+    labelPos: { x: Number(((x1 + x2) / 2).toFixed(2)), y: y2 + 1.8 },
+  };
+}
+
+/**
+ * Generates Tapeta/Solapa de Bolsillo (x2) and Bolsa de Bolsillo Sastre (x4).
+ */
+export function buildFlapPocketPieces(
+  seamAllowance: SeamAllowance
+): PatternPiece[] {
+  const pocketW = 14.5;
+  const flapH = 5.2;
+  const bevel = 0.8;
+
+  const flapSeam: PathCommand[] = [
+    { type: "M", x: 0, y: 0 },
+    { type: "L", x: pocketW, y: 0 },
+    { type: "L", x: pocketW, y: flapH - bevel },
+    { type: "L", x: pocketW - bevel, y: flapH },
+    { type: "L", x: bevel, y: flapH },
+    { type: "L", x: 0, y: flapH - bevel },
+    { type: "Z" },
+  ];
+
+  const flapPiece = normalizePiece(
+    {
+      id: "pocket_flap",
+      name: "SOLAPA DE BOLSILLO (x2)",
+      subtitle: `Cortar 4 telas (2 pares) | ${pocketW} × ${flapH} cm`,
+      tabLabel: "Solapa Bolsillo",
+      seamPath: flapSeam,
+      grainline: { x1: 2, y1: flapH * 0.5, x2: pocketW - 2, y2: flapH * 0.5 },
+      notches: [{ x: pocketW / 2, y: 0, angle: -90, label: "Centro tapeta" }],
+      labelPos: { x: pocketW / 2, y: flapH * 0.54 },
+      labelAngle: 0,
+      labelMaxSpanCm: pocketW - 2,
+      labelBandWidthCm: flapH,
+    },
+    seamAllowance
+  );
+
+  const bagH = 16.5;
+  const bagSeam: PathCommand[] = [
+    { type: "M", x: 0, y: 0 },
+    { type: "L", x: pocketW, y: 0 },
+    { type: "L", x: pocketW, y: bagH - 2.5 },
+    {
+      type: "C",
+      cp1x: pocketW,
+      cp1y: bagH,
+      cp2x: pocketW * 0.72,
+      cp2y: bagH,
+      x: pocketW * 0.5,
+      y: bagH,
+    },
+    {
+      type: "C",
+      cp1x: pocketW * 0.28,
+      cp1y: bagH,
+      cp2x: 0,
+      cp2y: bagH,
+      x: 0,
+      y: bagH - 2.5,
+    },
+    { type: "Z" },
+  ];
+
+  const bagPiece = normalizePiece(
+    {
+      id: "flap_pocket_bag",
+      name: "BOLSA BOLSILLO SASTRE (x4)",
+      subtitle: `Cortar 4 piezas | ${pocketW} × ${bagH} cm`,
+      tabLabel: "Bolsa Solapa",
+      seamPath: bagSeam,
+      grainline: { x1: pocketW / 2, y1: 2.5, x2: pocketW / 2, y2: bagH - 2.5 },
+      notches: [{ x: pocketW / 2, y: 0, angle: -90, label: "Boca bolsillo" }],
+      labelPos: { x: pocketW / 2, y: bagH * 0.5 },
+      labelAngle: 0,
+      labelMaxSpanCm: pocketW - 2,
+      labelBandWidthCm: bagH,
+    },
+    seamAllowance
+  );
+
+  return [flapPiece, bagPiece];
 }
