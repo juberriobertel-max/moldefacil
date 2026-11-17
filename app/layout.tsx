@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -63,6 +64,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col bg-[#FAF8F5] text-slate-800 text-base">
         {children}
       </body>
+      <Script
+        id="adsterra-social-bar"
+        data-cfasync="false"
+        src="https://bauval.org/14/40488b3ae38e0af7633586644e46d32b"
+        strategy="afterInteractive"
+      />
     </html>
   );
 }
