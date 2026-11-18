@@ -122,6 +122,16 @@ function calcularNivelDetalleViewport(anchoPx: number): NivelDetalle3D {
   return anchoPx < 640 || cores <= 4 ? "movil" : "escritorio";
 }
 
+function actualizarLimitesOrbitControls(
+  controls: OrbitControls,
+  perfil: PerfilCuerpo
+): void {
+  const h = Math.max(0.75, perfil.alturaTotalM);
+  controls.minDistance = Math.min(0.85, Math.max(0.42, h * 0.36));
+  controls.maxDistance = Math.min(6.2, Math.max(2.6, h * 3.15));
+  controls.maxPolarAngle = Math.PI * 0.52;
+}
+
 function calcularPoseCamaraPreset(
   preset: VistaCamaraPreset,
   perfil: PerfilCuerpo,
@@ -130,56 +140,40 @@ function calcularPoseCamaraPreset(
 ): CamaraObjetivo {
   const esSombrero = config.prenda === "bucketHat";
   const distFactor = aspect < 0.85 ? 1.18 : 1.0;
+  const h = Math.max(0.8, perfil.alturaTotalM);
 
-  if (esSombrero) {
-    const yCabeza = perfil.cuelloYM + 0.14;
-    if (preset === "espalda") {
+  // Detalle Escote hace zoom al pecho y cuello (o cabeza si la prenda es bucketHat)
+  if (preset === "detalle") {
+    if (esSombrero) {
+      const cCabeza = perfil.trayectorias.centroCabeza;
+      const distDetalleHat = Math.max(0.58, h * 0.44) * distFactor;
       return {
-        posicion: new THREE.Vector3(0, yCabeza + 0.08, -1.08 * distFactor),
-        target: new THREE.Vector3(0, yCabeza, 0),
+        posicion: new THREE.Vector3(0.16 * h, cCabeza[1] + 0.08, distDetalleHat),
+        target: new THREE.Vector3(cCabeza[0], cCabeza[1] + 0.02, cCabeza[2]),
       };
     }
-    if (preset === "detalle") {
-      return {
-        posicion: new THREE.Vector3(0.24, yCabeza + 0.12, 0.82 * distFactor),
-        target: new THREE.Vector3(0, yCabeza + 0.02, 0.02),
-      };
-    }
+
+    const yEscote = (perfil.cuelloYM + perfil.bustoYM) * 0.5 - 0.01;
+    const distDetalleEscote = Math.max(0.62, h * 0.52) * distFactor;
     return {
-      posicion: new THREE.Vector3(0, yCabeza + 0.08, 1.08 * distFactor),
-      target: new THREE.Vector3(0, yCabeza, 0),
+      posicion: new THREE.Vector3(0.12 * h, yEscote + 0.05 * h, distDetalleEscote),
+      target: new THREE.Vector3(0, yEscote, 0.03),
     };
   }
 
-  const tieneInferiorLargo =
-    config.prenda === "vestido" ||
-    config.prenda === "falda" ||
-    config.prenda === "pantalon" ||
-    config.prenda === "enterizo" ||
-    Boolean(config.esDosPiezas);
-
-  const centroY = tieneInferiorLargo
-    ? (perfil.hombroYM + Math.max(0.25, perfil.alturaTobilloM + 0.16)) * 0.5
-    : (perfil.hombroYM + perfil.caderaYM) * 0.5;
-  const distanciaBase = (tieneInferiorLargo ? 2.15 : 1.55) * distFactor;
+  // Frente y Espalda encuadran el cuerpo completo de pies (y=0) a cabeza (y=alturaTotalM)
+  const centroY = h * 0.48;
+  const distanciaCuerpoCompleto = h * 1.72 * distFactor;
 
   if (preset === "espalda") {
     return {
-      posicion: new THREE.Vector3(0, centroY + 0.06, -distanciaBase),
+      posicion: new THREE.Vector3(0, centroY + 0.03 * h, -distanciaCuerpoCompleto),
       target: new THREE.Vector3(0, centroY, 0),
     };
   }
 
-  if (preset === "detalle") {
-    const yEscote = (perfil.cuelloYM + perfil.bustoYM) * 0.5 - 0.02;
-    return {
-      posicion: new THREE.Vector3(0.18, yEscote + 0.1, 0.96 * distFactor),
-      target: new THREE.Vector3(0, yEscote, 0.04),
-    };
-  }
-
   return {
-    posicion: new THREE.Vector3(0, centroY + 0.06, distanciaBase),
+    posicion: new THREE.Vector3(0, centroY + 0.03 * h, distanciaCuerpoCompleto),
     target: new THREE.Vector3(0, centroY, 0),
   };
 }
@@ -339,11 +333,9 @@ export default function Garment3DPreview({
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.enablePan = false;
-    controls.minDistance = 0.72;
-    controls.maxDistance = 3.8;
     controls.minPolarAngle = 0.25;
-    controls.maxPolarAngle = Math.PI * 0.62;
     controls.autoRotateSpeed = 1.65;
+    actualizarLimitesOrbitControls(controls, perfilIni);
 
     const poseInicial = calcularPoseCamaraPreset(
       "frente",
@@ -609,6 +601,7 @@ export default function Garment3DPreview({
       const perfil = medidasCambiaron ? getBodyProfile(medidas) : m.perfilActual;
       if (medidasCambiaron) {
         m.maniqui.actualizar(perfil);
+        actualizarLimitesOrbitControls(m.controls, perfil);
         m.perfilActual = perfil;
         m.medidasActual = medidas;
       }
@@ -1035,12 +1028,29 @@ export default function Garment3DPreview({
             aria-pressed={autoGirar}
             aria-label="Girar 360°"
             onClick={() => {
-              setAutoGirar((prev) => {
-                const sig = !prev;
-                if (sig) setVistaActiva(null);
-                solicitarRender(sig);
-                return sig;
-              });
+              const sig = !autoGirar;
+              setAutoGirar(sig);
+              if (sig) {
+                setVistaActiva(null);
+                const m = motorRef.current;
+                if (m) {
+                  const destino = calcularPoseCamaraPreset(
+                    "frente",
+                    m.perfilActual,
+                    m.configActual,
+                    m.camera.aspect
+                  );
+                  transicionRef.current = {
+                    inicioMs: performance.now(),
+                    duracionMs: DURACION_TRANSICION_CAMARA_MS,
+                    posInicio: m.camera.position.clone(),
+                    posFin: destino.posicion,
+                    targetInicio: m.controls.target.clone(),
+                    targetFin: destino.target,
+                  };
+                }
+              }
+              solicitarRender(sig);
             }}
             className={`min-h-[44px] min-w-[44px] px-2.5 sm:px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C85A32] ${
               autoGirar
