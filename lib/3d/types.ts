@@ -159,6 +159,70 @@ export interface AnilloPerfil {
   seccion?: NombreSeccionAnatomica;
 }
 
+export interface PoseManiquiArticulado {
+  nombre: string;
+  /** Separación lateral de brazos respecto al torso en grados (20–25°). */
+  anguloBrazoDeg: number;
+  /** Ligera flexión natural del codo hacia adelante en grados. */
+  flexionCodoDeg: number;
+  /** Orientar las palmas hacia los muslos (pose relajada, sin mano en cadera). */
+  palmaHaciaMuslo: boolean;
+  /** Factor de separación lateral entre pies respecto al semieje de cadera. */
+  factorSeparacionPiesCadera: number;
+  /** Apertura natural de la punta de cada pie hacia afuera en grados. */
+  rotacionPieDeg: number;
+}
+
+export const POSE_RELAJADA_POR_DEFECTO: PoseManiquiArticulado = {
+  nombre: "pose_a_relajada",
+  anguloBrazoDeg: 22.5,
+  flexionCodoDeg: 11,
+  palmaHaciaMuslo: true,
+  factorSeparacionPiesCadera: 0.48,
+  rotacionPieDeg: 6,
+};
+
+export interface TrayectoriaBrazo3D {
+  lado: -1 | 1;
+  hombro: [number, number, number];
+  codo: [number, number, number];
+  muneca: [number, number, number];
+  manoFin: [number, number, number];
+  radioHombroM: number;
+  radioCodoM: number;
+  radioMunecaM: number;
+  largoManoM: number;
+}
+
+export interface TrayectoriaPierna3D {
+  lado: -1 | 1;
+  cadera: [number, number, number];
+  musloAlto: [number, number, number];
+  rodilla: [number, number, number];
+  tobillo: [number, number, number];
+  piePunta: [number, number, number];
+  radioCaderaM: number;
+  radioMusloM: number;
+  radioRodillaM: number;
+  radioTobilloM: number;
+  largoPieM: number;
+}
+
+export interface TrayectoriasCuerpo {
+  alturaCabezaM: number;
+  centroCabeza: [number, number, number];
+  radioCabezaX: number;
+  radioCabezaY: number;
+  radioCabezaZ: number;
+  largoCuelloM: number;
+  radioCuelloM: number;
+  brazoIzq: TrayectoriaBrazo3D;
+  brazoDer: TrayectoriaBrazo3D;
+  piernaIzq: TrayectoriaPierna3D;
+  piernaDer: TrayectoriaPierna3D;
+  pose: PoseManiquiArticulado;
+}
+
 export interface PerfilCuerpo {
   anillosClave: Record<NombreSeccionAnatomica, AnilloPerfil>;
   anillosInterpolados: AnilloPerfil[];
@@ -177,6 +241,7 @@ export interface PerfilCuerpo {
   largoMangaM: number;
   contornoMusloM: number;
   anchoBotaM: number;
+  trayectorias: TrayectoriasCuerpo;
 }
 
 export type NivelDetalle3D = "movil" | "escritorio";
