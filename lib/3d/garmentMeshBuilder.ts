@@ -12,6 +12,15 @@ import {
 } from "./types";
 
 export const TILE_ESTAMPADO_M = 0.08;
+export const OFFSET_COSTURA_M = 0.0024;
+
+export interface Etiqueta3DProyectada {
+  id: string;
+  texto: Etiqueta3DAncla["texto"];
+  xPx: number;
+  yPx: number;
+  visible: boolean;
+}
 
 export interface DatosCaidaAnimada {
   posicionesBase: Float32Array;
@@ -1015,6 +1024,87 @@ function construirMangas(
   return meshes;
 }
 
+interface AnilloFaldaEvaluado {
+  y: number;
+  anillo: AnilloPerfil;
+  aBase: number;
+  bBase: number;
+  zCentro: number;
+  circRef: number;
+}
+
+function calcularAlturasFalda(
+  config: ConfigPrenda,
+  yCinturaInicioM: number
+): { largoTotalFaldaM: number; boleroAltoM: number; yRuedoPrincipalM: number } {
+  const largoTotalFaldaM = clamp(cmAMetros(config.largoDeseado), 0.22, yCinturaInicioM - 0.04);
+  const boleroAltoM = config.bolero ? Math.min(cmAMetros(15), largoTotalFaldaM * 0.28) : 0;
+  const yRuedoPrincipalM = Math.max(0.04, yCinturaInicioM - (largoTotalFaldaM - boleroAltoM * 0.7));
+  return { largoTotalFaldaM, boleroAltoM, yRuedoPrincipalM };
+}
+
+function evaluarAnilloFaldaEnTr(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  yCinturaInicioM: number,
+  yRuedoPrincipalM: number,
+  largoTotalFaldaM: number,
+  drBase: number,
+  tr: number
+): AnilloFaldaEvaluado {
+  const caderaAnillo = perfil.anillosClave.cadera;
+  const y = THREE.MathUtils.lerp(yCinturaInicioM, yRuedoPrincipalM, tr);
+  const anillo = evaluarPerfilEnY(
+    perfil.anillosInterpolados,
+    Math.max(y, perfil.caderaYM)
+  );
+  const circRef = Math.PI * (anillo.a + anillo.b);
+  const tPostCadera = smoothstep(yCinturaInicioM, perfil.caderaYM, y);
+  let extraA = drBase;
+  let extraB = drBase;
+
+  if (config.vuelo === "recta") {
+    const aMin = caderaAnillo.a + drBase;
+    const bMin = caderaAnillo.b + drBase;
+    extraA = Math.max(drBase, aMin - anillo.a) * (0.2 + 0.8 * tPostCadera);
+    extraB = Math.max(drBase, bMin - anillo.b) * (0.2 + 0.8 * tPostCadera);
+  } else if (config.vuelo === "evase") {
+    const apertura = Math.pow(tr, 1.15) * largoTotalFaldaM * 0.28;
+    extraA = drBase + apertura * 1.1;
+    extraB = drBase + apertura * 0.95;
+  } else {
+    const apertura = Math.pow(tr, 1.05) * largoTotalFaldaM * 0.56;
+    extraA = drBase + apertura * 1.08;
+    extraB = drBase + apertura * 1.02;
+  }
+
+  return {
+    y,
+    anillo,
+    aBase: Math.max(anillo.a + drBase, anillo.a + extraA),
+    bBase: Math.max(anillo.b + drBase, anillo.b + extraB),
+    zCentro: anillo.desplazamientoZ,
+    circRef,
+  };
+}
+
+function evaluarOndaFaldaEnTheta(
+  config: ConfigPrenda,
+  tr: number,
+  theta: number
+): number {
+  if (config.vuelo === "circular") {
+    return Math.sin(8 * theta) * cmAMetros(5.2) * Math.pow(tr, 1.5);
+  }
+  if (config.vuelo === "evase") {
+    return Math.sin(8 * theta) * cmAMetros(1.4) * Math.pow(tr, 1.6);
+  }
+  if (config.silueta === "holgado") {
+    return (1 + Math.sin(16 * theta)) * cmAMetros(0.6) * tr;
+  }
+  return 0;
+}
+
 /**
  * Construye falda (recta, evasé o circular con ondas sinusoidales) + bolero opcional en el ruedo.
  */
@@ -1029,10 +1119,10 @@ function construirFaldaYBolero(
   const rows = opciones.nivelDetalle === "movil" ? 16 : 24;
   const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
 
-  const largoTotalFaldaM = clamp(cmAMetros(config.largoDeseado), 0.22, yCinturaInicioM - 0.04);
-  const boleroAltoM = config.bolero ? Math.min(cmAMetros(15), largoTotalFaldaM * 0.28) : 0;
-  const yRuedoPrincipalM = Math.max(0.04, yCinturaInicioM - (largoTotalFaldaM - boleroAltoM * 0.7));
-
+  const { largoTotalFaldaM, boleroAltoM, yRuedoPrincipalM } = calcularAlturasFalda(
+    config,
+    yCinturaInicioM
+  );
   const caderaAnillo = perfil.anillosClave.cadera;
   const drBase = calcularDeltaRadioM(config, yCinturaInicioM, perfil, ajusteStretch);
 
@@ -1049,52 +1139,19 @@ function construirFaldaYBolero(
 
   for (let r = 0; r < rows; r++) {
     const tr = r / (rows - 1);
-    const y = THREE.MathUtils.lerp(yCinturaInicioM, yRuedoPrincipalM, tr);
-    const anillo = evaluarPerfilEnY(
-      perfil.anillosInterpolados,
-      Math.max(y, perfil.caderaYM)
+    const { y, anillo, aBase, bBase, zCentro, circRef } = evaluarAnilloFaldaEnTr(
+      perfil,
+      config,
+      yCinturaInicioM,
+      yRuedoPrincipalM,
+      largoTotalFaldaM,
+      drBase,
+      tr
     );
-    const circRef = Math.PI * (anillo.a + anillo.b);
-
-    // Factor de vuelo desde cintura/cadera
-    const tPostCadera = smoothstep(yCinturaInicioM, perfil.caderaYM, y);
-    let extraA = drBase;
-    let extraB = drBase;
-
-    if (config.vuelo === "recta") {
-      // Mantiene volumen mínimo igual al de cadera desde la cadera hacia abajo
-      const aMin = caderaAnillo.a + drBase;
-      const bMin = caderaAnillo.b + drBase;
-      extraA = Math.max(drBase, aMin - anillo.a) * (0.2 + 0.8 * tPostCadera);
-      extraB = Math.max(drBase, bMin - anillo.b) * (0.2 + 0.8 * tPostCadera);
-    } else if (config.vuelo === "evase") {
-      const apertura = Math.pow(tr, 1.15) * largoTotalFaldaM * 0.28;
-      extraA = drBase + apertura * 1.1;
-      extraB = drBase + apertura * 0.95;
-    } else {
-      // Circular: expansión polar fuerte
-      const apertura = Math.pow(tr, 1.05) * largoTotalFaldaM * 0.56;
-      extraA = drBase + apertura * 1.08;
-      extraB = drBase + apertura * 1.02;
-    }
-
-    // Aseguramos mínimo despeje sobre caderas/piernas guía
-    const aBase = Math.max(anillo.a + drBase, anillo.a + extraA);
-    const bBase = Math.max(anillo.b + drBase, anillo.b + extraB);
-    const zCentro = anillo.desplazamientoZ;
 
     for (let s = 0; s <= segs; s++) {
       const theta = ((s / segs) - 0.5) * Math.PI * 2;
-      let onda = 0;
-      if (config.vuelo === "circular") {
-        // Ondas sinusoidales en falda circular con amplitud creciente hacia el ruedo
-        onda = Math.sin(8 * theta) * cmAMetros(5.2) * Math.pow(tr, 1.5);
-      } else if (config.vuelo === "evase") {
-        onda = Math.sin(8 * theta) * cmAMetros(1.4) * Math.pow(tr, 1.6);
-      } else if (config.silueta === "holgado") {
-        onda = (1 + Math.sin(16 * theta)) * cmAMetros(0.6) * tr;
-      }
-
+      const onda = evaluarOndaFaldaEnTheta(config, tr, theta);
       const rA = Math.max(anillo.a + 0.003, aBase + onda);
       const rB = Math.max(anillo.b + 0.003, bBase + onda);
 
@@ -1230,6 +1287,92 @@ function construirPretina(
   return mesh;
 }
 
+interface InfoPiernasPantalon {
+  tiroYM: number;
+  xMuslo: number;
+  zMuslo: number;
+  yBotaM: number;
+  rMusloPrenda: number;
+  rRodillaPrenda: number;
+  rBotaPrenda: number;
+}
+
+function calcularInfoPiernasPantalon(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda
+): InfoPiernasPantalon {
+  const tiroYM = clamp(
+    perfil.cinturaYM - perfil.alturaTiroM,
+    perfil.musloYM + 0.02,
+    perfil.caderaYM - cmAMetros(2)
+  );
+  const cadera = perfil.anillosClave.cadera;
+  const rMusloBase = clamp(
+    perfil.contornoMusloM / (2 * Math.PI),
+    0.045,
+    cadera.a * 0.54
+  );
+  const xMuslo = Math.max(rMusloBase * 0.96, cadera.a * 0.46);
+  const zMuslo = perfil.anillosClave.muslo.desplazamientoZ;
+  const largoPiernaM = clamp(cmAMetros(config.largoDeseado), 0.14, tiroYM - 0.04);
+  const yBotaM = Math.max(0.04, tiroYM - largoPiernaM);
+
+  const rMusloPrenda =
+    config.pantalon === "legging"
+      ? rMusloBase + 0.0025
+      : config.pantalon === "palazzo"
+        ? rMusloBase * 1.24
+        : rMusloBase * 1.1;
+  const rRodillaPrenda =
+    config.pantalon === "legging"
+      ? rMusloBase * 0.72
+      : config.pantalon === "palazzo"
+        ? rMusloBase * 1.32
+        : Math.max(rMusloBase * 0.85, cmAMetros(20) / (2 * Math.PI));
+  const rBotaPrenda =
+    config.pantalon === "legging"
+      ? rMusloBase * 0.48
+      : config.pantalon === "palazzo"
+        ? Math.max(rMusloBase * 1.44, perfil.anchoBotaM / Math.PI)
+        : clamp(perfil.anchoBotaM / Math.PI, rMusloBase * 0.68, rMusloBase * 1.18);
+
+  return {
+    tiroYM,
+    xMuslo,
+    zMuslo,
+    yBotaM,
+    rMusloPrenda,
+    rRodillaPrenda,
+    rBotaPrenda,
+  };
+}
+
+function evaluarCentroYRadioPierna(
+  info: InfoPiernasPantalon,
+  perfil: PerfilCuerpo,
+  lado: -1 | 1,
+  tr: number
+): { cx: number; y: number; cz: number; radio: number } {
+  const y = THREE.MathUtils.lerp(info.tiroYM + 0.03, info.yBotaM, tr);
+  const tRod = smoothstep(info.tiroYM, perfil.alturaRodillaM, y);
+  const tTob = smoothstep(perfil.alturaRodillaM, perfil.alturaTobilloM, y);
+  const cx = lado * (info.xMuslo * (1 - 0.14 * tRod - 0.08 * tTob));
+  const cz = info.zMuslo + 0.008 * (tRod - tTob);
+
+  let radio: number;
+  if (y >= perfil.alturaRodillaM) {
+    radio = THREE.MathUtils.lerp(info.rMusloPrenda, info.rRodillaPrenda, tRod);
+  } else {
+    const fBot = clamp(
+      (perfil.alturaRodillaM - y) / Math.max(0.05, perfil.alturaRodillaM - perfil.alturaTobilloM),
+      0,
+      1
+    );
+    radio = THREE.MathUtils.lerp(info.rRodillaPrenda, info.rBotaPrenda, fBot);
+  }
+  return { cx, y, cz, radio };
+}
+
 /**
  * Construye pantalón o inferior de enterizo bifurcando en dos piernas desde `alturaTiro`.
  */
@@ -1247,11 +1390,8 @@ function construirPantalon(
     meshes.push(construirPretina(perfil, config, perfil.cinturaYM, opciones));
   }
 
-  const tiroYM = clamp(
-    perfil.cinturaYM - perfil.alturaTiroM,
-    perfil.musloYM + 0.02,
-    perfil.caderaYM - cmAMetros(2)
-  );
+  const infoPiernas = calcularInfoPiernasPantalon(perfil, config);
+  const { tiroYM } = infoPiernas;
 
   // 1. Yugo pelvis/tiro (cintura -> tiro)
   const pos: number[] = [];
@@ -1305,37 +1445,6 @@ function construirPantalon(
   meshes.push(yugoMesh);
 
   // 2. Bifurcación en pierna izquierda y derecha (tiro -> bota)
-  const cadera = perfil.anillosClave.cadera;
-  const rMusloBase = clamp(
-    perfil.contornoMusloM / (2 * Math.PI),
-    0.045,
-    cadera.a * 0.54
-  );
-  const xMuslo = Math.max(rMusloBase * 0.96, cadera.a * 0.46);
-  const zMuslo = perfil.anillosClave.muslo.desplazamientoZ;
-
-  const largoPiernaM = clamp(cmAMetros(config.largoDeseado), 0.14, tiroYM - 0.04);
-  const yBotaM = Math.max(0.04, tiroYM - largoPiernaM);
-
-  const rMusloPrenda =
-    config.pantalon === "legging"
-      ? rMusloBase + 0.0025
-      : config.pantalon === "palazzo"
-        ? rMusloBase * 1.24
-        : rMusloBase * 1.1;
-  const rRodillaPrenda =
-    config.pantalon === "legging"
-      ? rMusloBase * 0.72
-      : config.pantalon === "palazzo"
-        ? rMusloBase * 1.32
-        : Math.max(rMusloBase * 0.85, cmAMetros(20) / (2 * Math.PI));
-  const rBotaPrenda =
-    config.pantalon === "legging"
-      ? rMusloBase * 0.48
-      : config.pantalon === "palazzo"
-        ? Math.max(rMusloBase * 1.44, perfil.anchoBotaM / Math.PI)
-        : clamp(perfil.anchoBotaM / Math.PI, rMusloBase * 0.68, rMusloBase * 1.18);
-
   const ringsLeg = opciones.nivelDetalle === "movil" ? 14 : 20;
   const segsLeg = opciones.nivelDetalle === "movil" ? 20 : 26;
 
@@ -1347,21 +1456,7 @@ function construirPantalon(
 
     for (let r = 0; r < ringsLeg; r++) {
       const tr = r / (ringsLeg - 1);
-      const y = THREE.MathUtils.lerp(tiroYM + 0.03, yBotaM, tr);
-
-      // Centro alineado con las piernas guía (muslo -> rodilla -> tobillo)
-      const tRod = smoothstep(tiroYM, perfil.alturaRodillaM, y);
-      const tTob = smoothstep(perfil.alturaRodillaM, perfil.alturaTobilloM, y);
-      const cx = lado * (xMuslo * (1 - 0.14 * tRod - 0.08 * tTob));
-      const cz = zMuslo + 0.008 * (tRod - tTob);
-
-      let radio: number;
-      if (y >= perfil.alturaRodillaM) {
-        radio = THREE.MathUtils.lerp(rMusloPrenda, rRodillaPrenda, tRod);
-      } else {
-        const fBot = clamp((perfil.alturaRodillaM - y) / Math.max(0.05, perfil.alturaRodillaM - perfil.alturaTobilloM), 0, 1);
-        radio = THREE.MathUtils.lerp(rRodillaPrenda, rBotaPrenda, fBot);
-      }
+      const { cx, y, cz, radio } = evaluarCentroYRadioPierna(infoPiernas, perfil, lado, tr);
 
       const circ = Math.PI * 2 * radio;
       for (let s = 0; s <= segsLeg; s++) {
@@ -1619,7 +1714,577 @@ function construirBucketHat(
 }
 
 /**
- * Orquestador principal de Fase 3: construye cualquier prenda solicitada a partir del perfil del cuerpo.
+ * Crea material de pespunte discontinuo en terracota de marca para el modo educativo 2D -> 3D.
+ */
+function crearMaterialCosturaTerracota(): THREE.LineDashedMaterial {
+  return new THREE.LineDashedMaterial({
+    color: 0xc85a32,
+    dashSize: 0.015,
+    gapSize: 0.008,
+    transparent: true,
+    opacity: 0.95,
+    depthTest: true,
+  });
+}
+
+/**
+ * Construye una línea punteada 3D asegurando `computeLineDistances()` para renderizado discontinuo.
+ */
+function crearLineaPespunte(
+  puntos: THREE.Vector3[],
+  material: THREE.LineDashedMaterial,
+  nombre: string
+): THREE.Line {
+  const geo = new THREE.BufferGeometry().setFromPoints(puntos);
+  const line = new THREE.Line(geo, material);
+  line.name = nombre;
+  line.computeLineDistances();
+  return line;
+}
+
+/**
+ * Evalúa punto 3D sobre la superficie real del torso de prenda desplazado `+offsetM` en su normal externa.
+ */
+function evaluarPuntoTorsoConOffset(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  y: number,
+  theta: number,
+  ajusteStretchM: number,
+  offsetM = OFFSET_COSTURA_M
+): THREE.Vector3 {
+  const anillo = evaluarPerfilEnY(
+    perfil.anillosInterpolados,
+    clamp(y, perfil.musloYM, perfil.cuelloYM)
+  );
+  const pt = muestrearPuntoTorsoPrenda(
+    anillo,
+    theta,
+    perfil,
+    config,
+    ajusteStretchM
+  );
+  const normal = calcularNormalTorso(anillo, theta);
+  return new THREE.Vector3(pt.x, pt.y, pt.z).addScaledVector(normal, offsetM);
+}
+
+/**
+ * Agrega costuras de copa/ala/laterales cuando la prenda es Sombrero Pescador (`bucketHat`).
+ */
+function poblarCosturasSombrero(
+  perfil: PerfilCuerpo,
+  grupoCosturas: THREE.Group,
+  mat: THREE.LineDashedMaterial
+): void {
+  const rCabeza = clamp(perfil.contornoCabezaM / (2 * Math.PI), 0.072, 0.105);
+  const cuello = perfil.anillosClave.cuello;
+  const centroCabezaY = perfil.cuelloYM + rCabeza * 1.38;
+  const centroCabezaZ = cuello.desplazamientoZ + 0.008;
+  const hatYBase = centroCabezaY + rCabeza * 0.14;
+
+  const rCopaTop = rCabeza * 0.92;
+  const rBaseCopa = rCabeza * 1.04;
+  const segs = 44;
+
+  const anillosHat = [
+    { nombre: "costura-copa-sombrero", radio: rCopaTop * 1.02 + OFFSET_COSTURA_M, y: hatYBase + cmAMetros(8.6) + 0.002 },
+    { nombre: "costura-ala-sombrero", radio: rBaseCopa + cmAMetros(0.4) + OFFSET_COSTURA_M, y: hatYBase + cmAMetros(0.9) + 0.002 },
+  ];
+
+  for (const anillo of anillosHat) {
+    const pts: THREE.Vector3[] = [];
+    for (let s = 0; s <= segs; s++) {
+      const th = (s / segs) * Math.PI * 2;
+      pts.push(
+        new THREE.Vector3(
+          anillo.radio * Math.sin(th),
+          anillo.y,
+          centroCabezaZ + anillo.radio * Math.cos(th)
+        )
+      );
+    }
+    grupoCosturas.add(crearLineaPespunte(pts, mat, anillo.nombre));
+  }
+
+  for (const lado of [-1, 1] as const) {
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 6; i++) {
+      const t = i / 6;
+      const r = THREE.MathUtils.lerp(rCopaTop, rBaseCopa, t) + OFFSET_COSTURA_M;
+      const y = THREE.MathUtils.lerp(cmAMetros(8.6), cmAMetros(1.2), t) + hatYBase;
+      pts.push(new THREE.Vector3(lado * r, y, centroCabezaZ));
+    }
+    grupoCosturas.add(
+      crearLineaPespunte(pts, mat, `costura-lateral-copa-${lado > 0 ? "izq" : "der"}`)
+    );
+  }
+}
+
+/**
+ * Pobla costuras de hombro, costados, sisa (omitida en `kimono`) y pinzas de busto/cintura
+ * para partes superiores (+2.4 mm fuera de la superficie).
+ */
+function poblarCosturasParteSuperior(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  yInferiorTopM: number,
+  ajusteStretchM: number,
+  grupoCosturas: THREE.Group,
+  mat: THREE.LineDashedMaterial
+): { etiquetaPinza?: Etiqueta3DAncla } {
+  let tienePinzas = false;
+
+  // 1. Costuras de hombro (hombro -> cuello; en kimono continúa por la cresta de la manga)
+  for (const lado of [-1, 1] as const) {
+    const ptsHombro: THREE.Vector3[] = [];
+    const pasos = 10;
+    for (let i = 0; i <= pasos; i++) {
+      const t = i / pasos;
+      if (config.manga === "kimono" && t > 0.5) {
+        const tf = (t - 0.5) / 0.5;
+        const yRef = THREE.MathUtils.lerp(
+          perfil.hombroYM - cmAMetros(1.4),
+          perfil.hombroYM - cmAMetros(4.2),
+          tf
+        );
+        const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, yRef);
+        const pt = muestrearPuntoTorsoPrenda(
+          anillo,
+          lado * Math.PI * 0.5,
+          perfil,
+          config,
+          ajusteStretchM
+        );
+        ptsHombro.push(
+          new THREE.Vector3(pt.x, pt.y + OFFSET_COSTURA_M * 1.4, pt.z)
+        );
+      } else {
+        const u = config.manga === "kimono" ? t / 0.5 : t;
+        const theta = lado * THREE.MathUtils.lerp(0.42, Math.PI * 0.5, u);
+        const yTop = calcularAlturaTopEscoteYSisa(config, theta, perfil);
+        const pt = evaluarPuntoTorsoConOffset(
+          perfil,
+          config,
+          yTop,
+          theta,
+          ajusteStretchM,
+          OFFSET_COSTURA_M
+        );
+        pt.y += 0.002;
+        ptsHombro.push(pt);
+      }
+    }
+    grupoCosturas.add(
+      crearLineaPespunte(
+        ptsHombro,
+        mat,
+        `costura-hombro-${lado > 0 ? "izq" : "der"}`
+      )
+    );
+  }
+
+  // 2. Costuras de costados (θ = ±90°, axila -> borde inferior top)
+  const yInicioCostado =
+    config.manga === "kimono"
+      ? Math.max(yInferiorTopM + cmAMetros(2), perfil.bustoYM - cmAMetros(11.5))
+      : perfil.bustoYM - cmAMetros(4.5);
+
+  for (const lado of [-1, 1] as const) {
+    const ptsCostado: THREE.Vector3[] = [];
+    const theta = lado * Math.PI * 0.5;
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      const y = THREE.MathUtils.lerp(yInicioCostado, yInferiorTopM, t);
+      ptsCostado.push(
+        evaluarPuntoTorsoConOffset(perfil, config, y, theta, ajusteStretchM)
+      );
+    }
+    grupoCosturas.add(
+      crearLineaPespunte(
+        ptsCostado,
+        mat,
+        `costura-costado-${lado > 0 ? "izq" : "der"}`
+      )
+    );
+  }
+
+  // 3. Costura de sisa (OMITIDA explícitamente cuando manga === 'kimono')
+  if (config.manga !== "kimono") {
+    const yTopSisa = perfil.hombroYM - cmAMetros(1.8);
+    const yBotSisa = Math.max(yInferiorTopM + cmAMetros(2), perfil.bustoYM - cmAMetros(4.8));
+    const yMidSisa = (yTopSisa + yBotSisa) * 0.5;
+    const radYSisa = Math.max(cmAMetros(4), (yTopSisa - yBotSisa) * 0.5);
+    const radThetaSisa = 0.34;
+    const pasosSisa = 22;
+
+    for (const lado of [-1, 1] as const) {
+      const ptsSisa: THREE.Vector3[] = [];
+      for (let i = 0; i <= pasosSisa; i++) {
+        const ang = (i / pasosSisa) * Math.PI * 2;
+        const theta = lado * Math.PI * 0.5 + Math.cos(ang) * radThetaSisa;
+        const y = yMidSisa + Math.sin(ang) * radYSisa;
+        ptsSisa.push(
+          evaluarPuntoTorsoConOffset(
+            perfil,
+            config,
+            y,
+            theta,
+            ajusteStretchM,
+            OFFSET_COSTURA_M + 0.001
+          )
+        );
+      }
+      grupoCosturas.add(
+        crearLineaPespunte(
+          ptsSisa,
+          mat,
+          `costura-sisa-${lado > 0 ? "izq" : "der"}`
+        )
+      );
+    }
+  }
+
+  // 4. Pinza de busto (costado -> ápice) en cuerpo adulto femenino
+  if (!config.esInfantil) {
+    tienePinzas = true;
+    for (const lado of [-1, 1] as const) {
+      const pSup = evaluarPuntoTorsoConOffset(
+        perfil,
+        config,
+        perfil.bustoYM - cmAMetros(2.8),
+        lado * 1.46,
+        ajusteStretchM
+      );
+      const pApex = evaluarPuntoTorsoConOffset(
+        perfil,
+        config,
+        perfil.bustoYM - cmAMetros(0.4),
+        lado * 0.44,
+        ajusteStretchM
+      );
+      const pInf = evaluarPuntoTorsoConOffset(
+        perfil,
+        config,
+        perfil.bustoYM - cmAMetros(5.6),
+        lado * 1.46,
+        ajusteStretchM
+      );
+      grupoCosturas.add(
+        crearLineaPespunte(
+          [pSup, pApex, pInf],
+          mat,
+          `costura-pinza-busto-${lado > 0 ? "izq" : "der"}`
+        )
+      );
+    }
+  }
+
+  // 5. Pinzas verticales de cintura (delantero y espalda en silueta entallada)
+  if (
+    config.silueta === "entallado" &&
+    !config.esInfantil &&
+    yInferiorTopM <= perfil.cinturaYM + cmAMetros(2)
+  ) {
+    tienePinzas = true;
+    const yPinzaTop = perfil.bustoYM - cmAMetros(3.0);
+    const yPinzaBot = Math.max(
+      yInferiorTopM + cmAMetros(1.5),
+      perfil.cinturaYM - cmAMetros(7.0)
+    );
+    const yPinzaMid = (yPinzaTop + yPinzaBot) * 0.5;
+
+    const familias = [
+      { nombre: "del", baseTheta: 0.36 },
+      { nombre: "tra", baseTheta: Math.PI - 0.34 },
+    ] as const;
+
+    for (const fam of familias) {
+      for (const lado of [-1, 1] as const) {
+        const thC = lado * fam.baseTheta;
+        const deltaTh = 0.055;
+        const pTop = evaluarPuntoTorsoConOffset(
+          perfil,
+          config,
+          yPinzaTop,
+          thC,
+          ajusteStretchM
+        );
+        const pMidA = evaluarPuntoTorsoConOffset(
+          perfil,
+          config,
+          yPinzaMid,
+          thC - deltaTh,
+          ajusteStretchM
+        );
+        const pBot = evaluarPuntoTorsoConOffset(
+          perfil,
+          config,
+          yPinzaBot,
+          thC,
+          ajusteStretchM
+        );
+        const pMidB = evaluarPuntoTorsoConOffset(
+          perfil,
+          config,
+          yPinzaMid,
+          thC + deltaTh,
+          ajusteStretchM
+        );
+        grupoCosturas.add(
+          crearLineaPespunte(
+            [pTop, pMidA, pBot, pMidB, pTop],
+            mat,
+            `costura-pinza-cintura-${fam.nombre}-${lado > 0 ? "izq" : "der"}`
+          )
+        );
+      }
+    }
+  }
+
+  if (!tienePinzas) return {};
+
+  const busto = perfil.anillosClave.busto;
+  const thetaAncla = 0.52;
+  const posAncla = evaluarPuntoTorsoConOffset(
+    perfil,
+    config,
+    busto.y - cmAMetros(3.5),
+    thetaAncla,
+    ajusteStretchM,
+    0.024
+  );
+  return {
+    etiquetaPinza: {
+      id: "lbl-pinza",
+      texto: "Pinza",
+      posicionLocalM: [posAncla.x, posAncla.y, posAncla.z],
+      normalLocal: [0.48, 0.05, 0.88],
+    },
+  };
+}
+
+/**
+ * Pobla costuras de costado de falda y pinzas superiores cuando aplica (`recta` sin top).
+ */
+function poblarCosturasFalda(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  yInicioFaldaM: number,
+  ajusteStretchM: number,
+  tieneSuperior: boolean,
+  grupoCosturas: THREE.Group,
+  mat: THREE.LineDashedMaterial
+): { etiquetaPinza?: Etiqueta3DAncla } {
+  const { largoTotalFaldaM, yRuedoPrincipalM } = calcularAlturasFalda(
+    config,
+    yInicioFaldaM
+  );
+  const drBase = calcularDeltaRadioM(config, yInicioFaldaM, perfil, ajusteStretchM);
+
+  for (const lado of [-1, 1] as const) {
+    const theta = lado * Math.PI * 0.5;
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 12; i++) {
+      const tr = i / 12;
+      const { y, anillo, aBase, bBase, zCentro } = evaluarAnilloFaldaEnTr(
+        perfil,
+        config,
+        yInicioFaldaM,
+        yRuedoPrincipalM,
+        largoTotalFaldaM,
+        drBase,
+        tr
+      );
+      const onda = evaluarOndaFaldaEnTheta(config, tr, theta);
+      const rA = Math.max(anillo.a + 0.003, aBase + onda) + OFFSET_COSTURA_M;
+      const rB = Math.max(anillo.b + 0.003, bBase + onda) + OFFSET_COSTURA_M;
+      pts.push(new THREE.Vector3(rA * Math.sin(theta), y, zCentro + rB * Math.cos(theta)));
+    }
+    grupoCosturas.add(
+      crearLineaPespunte(pts, mat, `costura-costado-falda-${lado > 0 ? "izq" : "der"}`)
+    );
+  }
+
+  if (!tieneSuperior && config.vuelo === "recta" && !config.esInfantil) {
+    const yTop = yInicioFaldaM - cmAMetros(1.8);
+    const yBot = Math.max(
+      yRuedoPrincipalM + cmAMetros(2),
+      perfil.anillosClave.caderaAlta.y
+    );
+    const yMid = (yTop + yBot) * 0.5;
+    for (const fam of [
+      { nombre: "del", baseTheta: 0.34 },
+      { nombre: "tra", baseTheta: Math.PI - 0.32 },
+    ] as const) {
+      for (const lado of [-1, 1] as const) {
+        const thC = lado * fam.baseTheta;
+        const p1 = evaluarPuntoTorsoConOffset(perfil, config, yTop, thC - 0.04, ajusteStretchM);
+        const p2 = evaluarPuntoTorsoConOffset(perfil, config, yBot, thC, ajusteStretchM);
+        const p3 = evaluarPuntoTorsoConOffset(perfil, config, yTop, thC + 0.04, ajusteStretchM);
+        const pMid = evaluarPuntoTorsoConOffset(perfil, config, yMid, thC, ajusteStretchM);
+        grupoCosturas.add(
+          crearLineaPespunte(
+            [p1, p2, p3, pMid, p1],
+            mat,
+            `costura-pinza-falda-${fam.nombre}-${lado > 0 ? "izq" : "der"}`
+          )
+        );
+      }
+    }
+    const pAnc = evaluarPuntoTorsoConOffset(perfil, config, yMid, 0.36, ajusteStretchM, 0.024);
+    return {
+      etiquetaPinza: {
+        id: "lbl-pinza",
+        texto: "Pinza",
+        posicionLocalM: [pAnc.x, pAnc.y, pAnc.z],
+        normalLocal: [0.35, 0, 0.94],
+      },
+    };
+  }
+
+  return {};
+}
+
+/**
+ * Pobla costuras de costado de pierna, entrepierna, tiro y pinzas en pantalón.
+ */
+function poblarCosturasPantalon(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  ajusteStretchM: number,
+  tieneSuperior: boolean,
+  grupoCosturas: THREE.Group,
+  mat: THREE.LineDashedMaterial
+): { etiquetaPinza?: Etiqueta3DAncla } {
+  const info = calcularInfoPiernasPantalon(perfil, config);
+
+  // Costura de tiro delantero y trasero
+  const ptsTiro: THREE.Vector3[] = [];
+  for (let i = 0; i <= 6; i++) {
+    const y = THREE.MathUtils.lerp(perfil.cinturaYM - cmAMetros(1.5), info.tiroYM + 0.01, i / 6);
+    ptsTiro.push(evaluarPuntoTorsoConOffset(perfil, config, y, 0, ajusteStretchM, OFFSET_COSTURA_M + 0.001));
+  }
+  for (let i = 0; i <= 6; i++) {
+    const y = THREE.MathUtils.lerp(info.tiroYM + 0.01, perfil.cinturaYM - cmAMetros(1.5), i / 6);
+    ptsTiro.push(evaluarPuntoTorsoConOffset(perfil, config, y, Math.PI, ajusteStretchM, OFFSET_COSTURA_M + 0.001));
+  }
+  grupoCosturas.add(crearLineaPespunte(ptsTiro, mat, "costura-tiro"));
+
+  // Costado externo y entrepierna interna de cada pierna
+  for (const lado of [-1, 1] as const) {
+    const ptsExt: THREE.Vector3[] = [];
+    const ptsInt: THREE.Vector3[] = [];
+
+    for (let i = 0; i <= 12; i++) {
+      const tr = i / 12;
+      const { cx, y, cz, radio } = evaluarCentroYRadioPierna(info, perfil, lado, tr);
+      const ondaExt =
+        config.pantalon === "palazzo"
+          ? Math.sin(10 * (lado * Math.PI * 0.5)) * cmAMetros(1.1) * Math.pow(tr, 1.4)
+          : 0;
+      const ondaInt =
+        config.pantalon === "palazzo"
+          ? Math.sin(10 * (-lado * Math.PI * 0.5)) * cmAMetros(1.1) * Math.pow(tr, 1.4)
+          : 0;
+      ptsExt.push(new THREE.Vector3(cx + lado * (radio + ondaExt + OFFSET_COSTURA_M), y, cz));
+      ptsInt.push(new THREE.Vector3(cx - lado * (radio + ondaInt + OFFSET_COSTURA_M), y, cz));
+    }
+    grupoCosturas.add(
+      crearLineaPespunte(ptsExt, mat, `costura-costado-pierna-${lado > 0 ? "izq" : "der"}`)
+    );
+    grupoCosturas.add(
+      crearLineaPespunte(ptsInt, mat, `costura-entrepierna-${lado > 0 ? "izq" : "der"}`)
+    );
+  }
+
+  if (!tieneSuperior && config.pantalon !== "legging" && !config.esInfantil) {
+    const yTop = perfil.cinturaYM - cmAMetros(1.8);
+    const yBot = Math.max(info.tiroYM + cmAMetros(4), perfil.caderaYM + cmAMetros(4));
+    for (const fam of [
+      { nombre: "del", baseTheta: 0.34 },
+      { nombre: "tra", baseTheta: Math.PI - 0.32 },
+    ] as const) {
+      for (const lado of [-1, 1] as const) {
+        const thC = lado * fam.baseTheta;
+        const p1 = evaluarPuntoTorsoConOffset(perfil, config, yTop, thC - 0.04, ajusteStretchM);
+        const p2 = evaluarPuntoTorsoConOffset(perfil, config, yBot, thC, ajusteStretchM);
+        const p3 = evaluarPuntoTorsoConOffset(perfil, config, yTop, thC + 0.04, ajusteStretchM);
+        grupoCosturas.add(
+          crearLineaPespunte(
+            [p1, p2, p3, p1],
+            mat,
+            `costura-pinza-pantalon-${fam.nombre}-${lado > 0 ? "izq" : "der"}`
+          )
+        );
+      }
+    }
+    const pAnc = evaluarPuntoTorsoConOffset(perfil, config, (yTop + yBot) * 0.5, 0.36, ajusteStretchM, 0.024);
+    return {
+      etiquetaPinza: {
+        id: "lbl-pinza",
+        texto: "Pinza",
+        posicionLocalM: [pAnc.x, pAnc.y, pAnc.z],
+        normalLocal: [0.35, 0, 0.94],
+      },
+    };
+  }
+
+  return {};
+}
+
+/**
+ * Proyecta las anclas 3D al viewport HTML usando `vector.project(camera)` y oculta
+ * automáticamente cualquier etiqueta que quede detrás del maniquí o fuera de pantalla.
+ */
+export function proyectarEtiquetas3D(
+  etiquetas: readonly Etiqueta3DAncla[],
+  grupoRaiz: THREE.Object3D,
+  camera: THREE.Camera,
+  anchoPx: number,
+  altoPx: number
+): Etiqueta3DProyectada[] {
+  if (anchoPx <= 0 || altoPx <= 0) return [];
+
+  grupoRaiz.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(grupoRaiz.matrixWorld);
+  const worldPos = new THREE.Vector3();
+  const worldNormal = new THREE.Vector3();
+  const toCamera = new THREE.Vector3();
+  const camWorldPos = new THREE.Vector3();
+  camera.getWorldPosition(camWorldPos);
+
+  return etiquetas.map((et) => {
+    worldPos.set(et.posicionLocalM[0], et.posicionLocalM[1], et.posicionLocalM[2]);
+    worldPos.applyMatrix4(grupoRaiz.matrixWorld);
+
+    worldNormal.set(et.normalLocal[0], et.normalLocal[1], et.normalLocal[2]);
+    worldNormal.applyMatrix3(normalMatrix).normalize();
+
+    toCamera.copy(camWorldPos).sub(worldPos).normalize();
+    const mirandoCamara = worldNormal.dot(toCamera) > 0.12;
+
+    const ndc = worldPos.clone().project(camera);
+    const enPantalla =
+      ndc.z >= -1 &&
+      ndc.z <= 1 &&
+      Math.abs(ndc.x) <= 0.95 &&
+      Math.abs(ndc.y) <= 0.95;
+
+    return {
+      id: et.id,
+      texto: et.texto,
+      xPx: (ndc.x * 0.5 + 0.5) * anchoPx,
+      yPx: (-ndc.y * 0.5 + 0.5) * altoPx,
+      visible: mirandoCamara && enPantalla,
+    };
+  });
+}
+
+/**
+ * Orquestador principal de Fase 3 y Fase 5: construye cualquier prenda solicitada a partir del perfil
+ * junto con su grupo educativo de costuras y pinzas (2D -> 3D).
  */
 export function construirMallaPrenda(
   perfil: PerfilCuerpo,
@@ -1632,6 +2297,9 @@ export function construirMallaPrenda(
   const grupoCosturas = new THREE.Group();
   grupoCosturas.name = "costuras-pinzas-3d";
   grupoCosturas.visible = opciones.mostrarCosturas;
+
+  const matCostura = crearMaterialCosturaTerracota();
+  const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
 
   const etiquetas: Etiqueta3DAncla[] = [];
   let triangulosTotales = 0;
@@ -1655,6 +2323,7 @@ export function construirMallaPrenda(
     const hat = construirBucketHat(perfil, opciones);
     hat.objetos.forEach(contarYAgregar);
     etiquetas.push(hat.etiquetaFrente);
+    poblarCosturasSombrero(perfil, grupoCosturas, matCostura);
     grupo.add(grupoCosturas);
     return { grupo, grupoCosturas, etiquetas, triangulosTotales };
   }
@@ -1675,6 +2344,8 @@ export function construirMallaPrenda(
     config.prenda === "pantalon" ||
     config.prenda === "enterizo" ||
     (Boolean(config.esDosPiezas) && config.dosPiezasAbajo === "pants");
+
+  let etiquetaPinza: Etiqueta3DAncla | undefined;
 
   if (requiereParteSuperior) {
     let yInferiorTopM = perfil.cinturaYM;
@@ -1718,6 +2389,47 @@ export function construirMallaPrenda(
 
     const mangas = construirMangas(perfil, config, opciones);
     mangas.forEach(contarYAgregar);
+
+    const resCostSup = poblarCosturasParteSuperior(
+      perfil,
+      config,
+      yInferiorTopM,
+      ajusteStretch,
+      grupoCosturas,
+      matCostura
+    );
+    if (resCostSup.etiquetaPinza) etiquetaPinza = resCostSup.etiquetaPinza;
+  }
+
+  // Costura de corte horizontal en cintura si la prenda lleva unión/pretina en cintura
+  const llevaCorteCintura =
+    config.prenda === "vestido" ||
+    config.prenda === "enterizo" ||
+    config.prenda === "falda" ||
+    config.prenda === "pantalon" ||
+    Boolean(config.esDosPiezas);
+
+  if (llevaCorteCintura) {
+    const yCorteCintura =
+      config.corteImperio && config.prenda === "vestido"
+        ? perfil.anillosClave.bajoBusto.y
+        : perfil.cinturaYM;
+    const ptsCint: THREE.Vector3[] = [];
+    const offsetCint = config.cinturon ? 0.0072 : OFFSET_COSTURA_M + 0.0025;
+    for (let s = 0; s <= 48; s++) {
+      const theta = ((s / 48) - 0.5) * Math.PI * 2;
+      ptsCint.push(
+        evaluarPuntoTorsoConOffset(
+          perfil,
+          config,
+          yCorteCintura,
+          theta,
+          ajusteStretch,
+          offsetCint
+        )
+      );
+    }
+    grupoCosturas.add(crearLineaPespunte(ptsCint, matCostura, "costura-cintura"));
   }
 
   if (requiereFalda) {
@@ -1733,6 +2445,19 @@ export function construirMallaPrenda(
     );
     faldaMeshes.forEach(contarYAgregar);
 
+    const resCostFalda = poblarCosturasFalda(
+      perfil,
+      config,
+      yInicioFaldaM,
+      ajusteStretch,
+      requiereParteSuperior,
+      grupoCosturas,
+      matCostura
+    );
+    if (!etiquetaPinza && resCostFalda.etiquetaPinza) {
+      etiquetaPinza = resCostFalda.etiquetaPinza;
+    }
+
     if (!requiereParteSuperior) {
       const cad = perfil.anillosClave.cadera;
       etiquetas.push({
@@ -1747,6 +2472,19 @@ export function construirMallaPrenda(
   if (requierePantalon) {
     const pantMeshes = construirPantalon(perfil, config, opciones);
     pantMeshes.forEach(contarYAgregar);
+
+    const resCostPant = poblarCosturasPantalon(
+      perfil,
+      config,
+      ajusteStretch,
+      requiereParteSuperior,
+      grupoCosturas,
+      matCostura
+    );
+    if (!etiquetaPinza && resCostPant.etiquetaPinza) {
+      etiquetaPinza = resCostPant.etiquetaPinza;
+    }
+
     if (!requiereParteSuperior) {
       const cad = perfil.anillosClave.cadera;
       etiquetas.push({
@@ -1756,6 +2494,10 @@ export function construirMallaPrenda(
         normalLocal: [0, 0, 1],
       });
     }
+  }
+
+  if (etiquetaPinza) {
+    etiquetas.push(etiquetaPinza);
   }
 
   // Etiqueta trasera de orientación general
