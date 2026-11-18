@@ -232,6 +232,52 @@ function proyectarFueraDelTorso(
 }
 
 /**
+ * Empuja un punto `(x, y, z)` fuera del brazo o pierna real (cápsula cónica entre A y B)
+ * manteniendo al menos `holguraMinM` sobre la extremidad opaca del maniquí.
+ */
+function proyectarFueraDeSegmento(
+  px: number,
+  py: number,
+  pz: number,
+  inicio: readonly [number, number, number],
+  fin: readonly [number, number, number],
+  rInicio: number,
+  rFin: number,
+  holguraMinM: number
+): { x: number; y: number; z: number } {
+  const ax = fin[0] - inicio[0];
+  const ay = fin[1] - inicio[1];
+  const az = fin[2] - inicio[2];
+  const lenSq = ax * ax + ay * ay + az * az;
+  if (lenSq < 1e-8) return { x: px, y: py, z: pz };
+
+  const t = clamp(
+    ((px - inicio[0]) * ax + (py - inicio[1]) * ay + (pz - inicio[2]) * az) / lenSq,
+    0,
+    1
+  );
+  const qx = inicio[0] + ax * t;
+  const qy = inicio[1] + ay * t;
+  const qz = inicio[2] + az * t;
+
+  const rObj = THREE.MathUtils.lerp(rInicio, rFin, t) + holguraMinM;
+  const dx = px - qx;
+  const dy = py - qy;
+  const dz = pz - qz;
+  const dist = Math.hypot(dx, dy, dz);
+  if (dist >= rObj) return { x: px, y: py, z: pz };
+  if (dist < 1e-6) {
+    return { x: qx, y: qy + rObj, z: qz };
+  }
+  const esc = rObj / dist;
+  return {
+    x: qx + dx * esc,
+    y: qy + dy * esc,
+    z: qz + dz * esc,
+  };
+}
+
+/**
  * Calcula normal radial horizontal saliente del torso elíptico en `(y, theta)`.
  */
 function calcularNormalTorso(anillo: AnilloPerfil, theta: number): THREE.Vector3 {
@@ -446,15 +492,30 @@ function muestrearPuntoTorsoPrenda(
       extKimono = yFactor * thetaFactor;
 
       if (extKimono > 0.001) {
-        const alcanceMangaM = Math.min(perfil.largoMangaM * 0.56, cmAMetros(31));
+        const brazo = ladoSign < 0 ? perfil.trayectorias.brazoIzq : perfil.trayectorias.brazoDer;
+        const alcanceMangaM = Math.min(perfil.largoMangaM * 0.58, cmAMetros(30));
         const extLat = alcanceMangaM * extKimono;
-        // Arco curvo suave bajo axila hacia brazo caído ~22°
-        x += ladoSign * extLat * 0.92;
-        y -= extLat * 0.38 * (1 - 0.35 * yFactor);
-        z += cmAMetros(0.8) * extKimono;
+        // Cae suavemente acompañando la pendiente natural del brazo superior sin perder forma kimono
+        x += ladoSign * extLat * 0.86;
+        y -= extLat * 0.56 * (1 - 0.35 * yFactor);
+        z += cmAMetros(0.6) * extKimono;
 
-        // Proyectamos fuera del anillo real a la nueva altura `y` para evitar perforar clavícula/hombro
-        const seguro = proyectarFueraDelTorso(x, y, z, perfil, Math.max(0.0025, deltaR * 0.85));
+        // Protegemos tanto el torso como el brazo opaco y codo contra cualquier penetración
+        const trasBrazo = proyectarFueraDeSegmento(
+          x,
+          y,
+          z,
+          brazo.hombro,
+          brazo.codo,
+          brazo.radioHombroM,
+          brazo.radioCodoM,
+          Math.max(0.01, deltaR * 0.95)
+        );
+        x = trasBrazo.x;
+        y = trasBrazo.y;
+        z = trasBrazo.z;
+
+        const seguro = proyectarFueraDelTorso(x, y, z, perfil, Math.max(0.004, deltaR * 0.85));
         x = seguro.x;
         z = seguro.z;
       }
@@ -527,11 +588,21 @@ function construirCorpino(
       const fracMid = (s + 0.5) / segsRad;
       const thetaMid = (fracMid - 0.5) * Math.PI * 2;
 
-      // Para escote wrap/solapa/camisero dejamos la V delantera abierta para superponer las vistas 3D
+      // Para escote wrap dejamos V profunda; solapaSastre muesca estrecha; camisero abotonado cerrado arriba
+      if (esWrap && r < Math.floor(rows * 0.55) && Math.abs(thetaMid) < 0.24) {
+        continue;
+      }
       if (
-        (esWrap || config.escote === "solapaSastre" || config.escote === "camisero") &&
-        r < Math.floor(rows * 0.55) &&
-        Math.abs(thetaMid) < 0.24
+        config.escote === "solapaSastre" &&
+        r < Math.floor(rows * 0.34) &&
+        Math.abs(thetaMid) < (1 - r / Math.max(1, rows * 0.36)) * 0.16
+      ) {
+        continue;
+      }
+      if (
+        config.escote === "camisero" &&
+        r < Math.floor(rows * 0.12) &&
+        Math.abs(thetaMid) < 0.08
       ) {
         continue;
       }
@@ -756,58 +827,66 @@ function construirCuellosYBotones(
     return { meshes: objetos };
   }
 
-  // Solapa Sastre o Cuello Camisero: cuello posterior continuo (sin cruzar theta = 0) + dos solapas frontales
+  // Solapa Sastre o Cuello Camisero: cuello posterior continuo pegado al escote + solapas articuladas + pechera central
   if (config.escote === "solapaSastre" || config.escote === "camisero") {
     const cuelloMuestras: MuestraTiraTorso[] = [];
     const pasosCuello = 28;
-    const yBase = perfil.cuelloYM - cmAMetros(1.1);
-    const anilloCuello = evaluarPerfilEnY(perfil.anillosInterpolados, yBase);
-    const rCuello = calcularDeltaRadioM(config, yBase, perfil, ajusteStretch) + 0.008;
+    const esCamisero = config.escote === "camisero";
+    const thetaInicio = esCamisero ? 0.16 : 0.22;
 
     for (let i = 0; i <= pasosCuello; i++) {
       const t = i / pasosCuello;
-      // Recorre del frente-izq (0.36 rad) por la nuca (π) hasta el frente-der (2π - 0.36 rad)
-      const theta = THREE.MathUtils.lerp(0.36, Math.PI * 2 - 0.36, t);
+      // Recorre del frente-izq por la nuca (π) hasta el frente-der siguiendo la curva real del escote
+      const theta = THREE.MathUtils.lerp(thetaInicio, Math.PI * 2 - thetaInicio, t);
+      const factorFrente = Math.exp(-Math.pow(Math.sin(theta * 0.5) / 0.28, 2));
+      const yCurva =
+        perfil.cuelloYM - cmAMetros(1.1) - (esCamisero ? cmAMetros(1.1) : cmAMetros(1.6)) * factorFrente;
+      const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, yCurva);
+      const rCuello = calcularDeltaRadioM(config, yCurva, perfil, ajusteStretch) + 0.0055;
+
       cuelloMuestras.push({
         pos: new THREE.Vector3(
-          (anilloCuello.a + rCuello) * Math.sin(theta),
-          yBase + cmAMetros(1.0),
-          anilloCuello.desplazamientoZ + (anilloCuello.b + rCuello) * Math.cos(theta)
+          (anillo.a + rCuello) * Math.sin(theta),
+          yCurva + cmAMetros(0.8),
+          anillo.desplazamientoZ + (anillo.b + rCuello) * Math.cos(theta)
         ),
-        normalOut: calcularNormalTorso(anilloCuello, theta),
+        normalOut: calcularNormalTorso(anillo, theta),
       });
     }
 
     objetos.push(
       construirTiraConRelieveSobreTorso(
         cuelloMuestras,
-        cmAMetros(4.4),
-        0.0035,
+        esCamisero ? cmAMetros(3.8) : cmAMetros(4.4),
+        0.0032,
         false,
         perfil,
-        0.005,
+        0.0045,
         mat,
         "cuello-superior",
-        0.25
+        0.3
       )
     );
 
-    // Dos solapas con línea de rolido dobladas tangencialmente en el pecho
+    // Solapas / picos de cuello doblados desde la unión del cuello sin dejar huecos
     for (const lado of [-1, 1] as const) {
-      const yTopSolapa = perfil.hombroYM - cmAMetros(2);
-      const yFinSolapa =
-        config.escote === "solapaSastre"
-          ? perfil.bustoYM - cmAMetros(5)
-          : perfil.bustoYM + cmAMetros(4);
-      const anchoSolapa = config.escote === "solapaSastre" ? 0.055 : 0.036;
+      const yTopSolapa = perfil.cuelloYM - cmAMetros(1.9);
+      const yFinSolapa = esCamisero
+        ? perfil.bustoYM + cmAMetros(5.2)
+        : perfil.bustoYM - cmAMetros(4.2);
+      const anchoSolapa = esCamisero ? 0.032 : 0.056;
 
       const solapaMuestras: MuestraTiraTorso[] = [];
       for (let i = 0; i <= 10; i++) {
         const tf = i / 10;
         const y = THREE.MathUtils.lerp(yTopSolapa, yFinSolapa, tf);
-        const theta = lado * THREE.MathUtils.lerp(0.32, 0.06, tf);
+        const theta =
+          lado *
+          (esCamisero
+            ? THREE.MathUtils.lerp(0.24, 0.09, tf)
+            : THREE.MathUtils.lerp(0.26, 0.06, tf));
         const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, y);
-        const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.009;
+        const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.0065;
         solapaMuestras.push({
           pos: new THREE.Vector3(
             (anillo.a + dr) * Math.sin(theta),
@@ -821,12 +900,45 @@ function construirCuellosYBotones(
         construirTiraConRelieveSobreTorso(
           solapaMuestras,
           anchoSolapa,
-          0.0035,
+          0.0032,
           false,
           perfil,
           0.005,
           mat,
           `solapa-${lado > 0 ? "izq" : "der"}`,
+          0.5
+        )
+      );
+    }
+
+    // Pechera vertical centrada en camisero para alojar los botones con relieve limpio
+    if (esCamisero) {
+      const placketMuestras: MuestraTiraTorso[] = [];
+      const yTopPlacket = perfil.bustoYM + cmAMetros(6.0);
+      const yBotPlacket = Math.max(yInferiorM + cmAMetros(2.0), perfil.cinturaYM - cmAMetros(4.0));
+      for (let i = 0; i <= 12; i++) {
+        const y = THREE.MathUtils.lerp(yTopPlacket, yBotPlacket, i / 12);
+        const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, y);
+        const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.0055;
+        placketMuestras.push({
+          pos: new THREE.Vector3(
+            0,
+            y,
+            anillo.desplazamientoZ + anillo.b + dr
+          ),
+          normalOut: calcularNormalTorso(anillo, 0),
+        });
+      }
+      objetos.push(
+        construirTiraConRelieveSobreTorso(
+          placketMuestras,
+          cmAMetros(2.6),
+          0.0028,
+          false,
+          perfil,
+          0.0045,
+          mat,
+          "pechera-camisero",
           0.5
         )
       );
@@ -860,7 +972,7 @@ function construirCuellosYBotones(
       dummy.position.set(
         0,
         yBtn,
-        anillo.desplazamientoZ + anillo.b + dr + 0.004
+        anillo.desplazamientoZ + anillo.b + dr + (esCamisero ? 0.0095 : 0.0045)
       );
       dummy.updateMatrix();
       instBotones.setMatrixAt(i, dummy.matrix);
@@ -888,7 +1000,8 @@ function construirCuellosYBotones(
 }
 
 /**
- * Construye mangas pegadas (corta/larga), acampanadas y farol sobre la trayectoria real brazo guía.
+ * Construye mangas pegadas (corta/larga), acampanadas y farol sobre la trayectoria real
+ * del brazo exportada desde `bodyProfile.ts` (`rBrazo + holgura`), encajando la copa en la sisa.
  */
 function construirMangas(
   perfil: PerfilCuerpo,
@@ -898,51 +1011,43 @@ function construirMangas(
   if (config.manga === "ninguna" || config.manga === "kimono") return [];
 
   const meshes: THREE.Mesh[] = [];
-  const hombros = perfil.anillosClave.hombros;
-  const busto = perfil.anillosClave.busto;
-  const escalaHumana = clamp(perfil.alturaTotalM / 1.65, 0.55, 1.18);
-  const angBrazoRad = (22 * Math.PI) / 180;
-
-  const largoBrazoGuia = Math.max(perfil.largoMangaM, 0.46 * escalaHumana);
-  const largoSup = largoBrazoGuia * 0.48;
-  const largoAnt = largoBrazoGuia * 0.46;
-
-  let tFinBrazo = 0.38;
-  if (
-    config.manga === "largaPegada" ||
-    config.manga === "acampanada"
-  ) {
-    tFinBrazo = clamp(perfil.largoMangaM / largoBrazoGuia, 0.72, 1.0);
-  } else if (config.manga === "farol") {
-    tFinBrazo = 0.46;
-  }
-
-  const rings = opciones.nivelDetalle === "movil" ? 12 : 18;
+  const rings = opciones.nivelDetalle === "movil" ? 14 : 20;
   const segs = opciones.nivelDetalle === "movil" ? 20 : 28;
-  const rBaseBrazo = clamp(busto.a * 0.28, 0.028, 0.056) + 0.011;
+  const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
+
+  const holguraBaseM =
+    (config.silueta === "holgado" ? 0.015 : 0.01) +
+    Math.max(0, ajusteStretch * 0.3);
 
   for (const lado of [-1, 1] as const) {
-    const pHombro = new THREE.Vector3(
-      lado * hombros.a * 1.01,
-      hombros.y - 0.014 * escalaHumana,
-      hombros.desplazamientoZ
+    const brazo = lado < 0 ? perfil.trayectorias.brazoIzq : perfil.trayectorias.brazoDer;
+    const pHombroReal = new THREE.Vector3(...brazo.hombro);
+    const pCodo = new THREE.Vector3(...brazo.codo);
+    const pMuneca = new THREE.Vector3(...brazo.muneca);
+
+    const largoBrazoReal = Math.max(
+      0.24,
+      pHombroReal.distanceTo(pCodo) + pCodo.distanceTo(pMuneca)
     );
-    const dirSup = new THREE.Vector3(
-      lado * Math.sin(angBrazoRad),
-      -Math.cos(angBrazoRad),
-      -0.05
-    ).normalize();
-    const pCodo = pHombro.clone().addScaledVector(dirSup, largoSup);
-    const dirAnt = new THREE.Vector3(
-      lado * Math.sin(angBrazoRad * 0.72),
-      -Math.cos(angBrazoRad * 0.72),
-      0.16
-    ).normalize();
-    const pMuneca = pCodo.clone().addScaledVector(dirAnt, largoAnt);
+
+    let tFinBrazo = 0.36;
+    if (
+      config.manga === "largaPegada" ||
+      config.manga === "acampanada"
+    ) {
+      tFinBrazo = clamp(perfil.largoMangaM / largoBrazoReal, 0.72, 0.99);
+    } else if (config.manga === "farol") {
+      tFinBrazo = 0.45;
+    }
+
+    // Anclaje levemente metido en la sisa del corpiño para cerrar el encuentro hombro-manga
+    const pInicioCopa = pHombroReal
+      .clone()
+      .add(new THREE.Vector3(-lado * 0.013, 0.01, 0));
 
     const trayectoria = new THREE.CatmullRomCurve3([
-      pHombro,
-      pHombro.clone().lerp(pCodo, 0.5),
+      pInicioCopa,
+      pHombroReal.clone().lerp(pCodo, 0.5),
       pCodo,
       pCodo.clone().lerp(pMuneca, 0.5),
       pMuneca,
@@ -953,28 +1058,44 @@ function construirMangas(
     const idx: number[] = [];
     const pesos = new Float32Array((rings + 1) * (segs + 1));
 
+    const evaluarRadioBrazoReal = (u: number): number => {
+      if (u <= 0.52) {
+        return THREE.MathUtils.lerp(
+          brazo.radioHombroM,
+          brazo.radioCodoM,
+          u / 0.52
+        );
+      }
+      const k = (u - 0.52) / 0.48;
+      // Leve curvatura muscular del antebrazo bajo el codo que estrecha en muñeca
+      const baseAnt = THREE.MathUtils.lerp(brazo.radioCodoM * 1.03, brazo.radioMunecaM, k);
+      return baseAnt;
+    };
+
     for (let r = 0; r <= rings; r++) {
       const tr = r / rings;
       const uT = tr * tFinBrazo;
       const centro = trayectoria.getPoint(uT);
       const tangente = trayectoria.getTangent(uT).normalize();
-      const refUp = Math.abs(tangente.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+      const refUp =
+        Math.abs(tangente.x) < 0.9
+          ? new THREE.Vector3(1, 0, 0)
+          : new THREE.Vector3(0, 0, 1);
       const normalU = new THREE.Vector3().crossVectors(refUp, tangente).normalize();
       const binormalV = new THREE.Vector3().crossVectors(tangente, normalU).normalize();
 
-      // Radio anatómico según tipo de manga
-      let radio = THREE.MathUtils.lerp(rBaseBrazo, rBaseBrazo * 0.64, uT);
+      let radio = evaluarRadioBrazoReal(uT) + holguraBaseM;
       if (config.manga === "acampanada" && uT > 0.42) {
         const fCamp = (uT - 0.42) / Math.max(0.1, tFinBrazo - 0.42);
-        radio += Math.pow(fCamp, 1.35) * cmAMetros(7.5);
+        radio += Math.pow(fCamp, 1.35) * cmAMetros(7.2);
       } else if (config.manga === "farol") {
-        // Copa abullonada con recogido hacia el puño
         const puff = Math.sin(tr * Math.PI);
         radio += puff * cmAMetros(4.2);
-        if (tr > 0.85) radio *= 0.86;
+        if (tr > 0.85) radio = Math.max(evaluarRadioBrazoReal(uT) + 0.008, radio * 0.88);
       }
 
-      const vPos = uT * largoBrazoGuia;
+      const fCopa = smoothstep(0.24, 0, tr);
+      const vPos = uT * largoBrazoReal;
       const circ = Math.PI * 2 * radio;
 
       for (let s = 0; s <= segs; s++) {
@@ -992,9 +1113,45 @@ function construirMangas(
           .addScaledVector(normalU, Math.cos(theta) * rOnda)
           .addScaledVector(binormalV, Math.sin(theta) * rOnda);
 
-        pos.push(p.x, p.y, p.z);
+        // Moldeo anatómico de la copa en la sisa para eliminar cualquier borde cilíndrico abierto
+        if (fCopa > 0.001) {
+          const dYNorm = clamp((p.y - centro.y) / Math.max(0.01, rOnda), -1, 1);
+          const dInwardNorm = clamp((-lado * (p.x - centro.x)) / Math.max(0.01, rOnda), -1, 1);
+          if (dYNorm > 0) {
+            p.x -= lado * 0.016 * fCopa * dYNorm;
+            p.y += 0.009 * fCopa * dYNorm;
+          }
+          if (dInwardNorm > 0) {
+            p.x -= lado * 0.014 * fCopa * dInwardNorm;
+          }
+        }
+
+        // Blindaje duro: la manga jamás atraviesa el brazo superior ni el antebrazo opacos
+        const envSup = proyectarFueraDeSegmento(
+          p.x,
+          p.y,
+          p.z,
+          brazo.hombro,
+          brazo.codo,
+          brazo.radioHombroM,
+          brazo.radioCodoM,
+          0.0065
+        );
+        const envAnt = proyectarFueraDeSegmento(
+          envSup.x,
+          envSup.y,
+          envSup.z,
+          brazo.codo,
+          brazo.muneca,
+          brazo.radioCodoM,
+          brazo.radioMunecaM,
+          0.0065
+        );
+
+        pos.push(envAnt.x, envAnt.y, envAnt.z);
         uvs.push((theta / (Math.PI * 2)) * circ, -vPos);
-        pesos[r * (segs + 1) + s] = config.manga === "acampanada" ? Math.pow(tr, 1.6) * 0.65 : tr * 0.25;
+        pesos[r * (segs + 1) + s] =
+          config.manga === "acampanada" ? Math.pow(tr, 1.6) * 0.65 : tr * 0.25;
       }
     }
 
@@ -1035,11 +1192,20 @@ interface AnilloFaldaEvaluado {
 
 function calcularAlturasFalda(
   config: ConfigPrenda,
-  yCinturaInicioM: number
+  yCinturaInicioM: number,
+  perfil: PerfilCuerpo
 ): { largoTotalFaldaM: number; boleroAltoM: number; yRuedoPrincipalM: number } {
-  const largoTotalFaldaM = clamp(cmAMetros(config.largoDeseado), 0.22, yCinturaInicioM - 0.04);
+  const yPisoSeguroM = Math.max(0.032, perfil.alturaTobilloM * 0.42);
+  const largoTotalFaldaM = clamp(
+    cmAMetros(config.largoDeseado),
+    0.22,
+    Math.max(0.24, yCinturaInicioM - yPisoSeguroM)
+  );
   const boleroAltoM = config.bolero ? Math.min(cmAMetros(15), largoTotalFaldaM * 0.28) : 0;
-  const yRuedoPrincipalM = Math.max(0.04, yCinturaInicioM - (largoTotalFaldaM - boleroAltoM * 0.7));
+  const yRuedoPrincipalM = Math.max(
+    yPisoSeguroM,
+    yCinturaInicioM - (largoTotalFaldaM - boleroAltoM * 0.7)
+  );
   return { largoTotalFaldaM, boleroAltoM, yRuedoPrincipalM };
 }
 
@@ -1053,6 +1219,7 @@ function evaluarAnilloFaldaEnTr(
   tr: number
 ): AnilloFaldaEvaluado {
   const caderaAnillo = perfil.anillosClave.cadera;
+  const pierna = perfil.trayectorias.piernaDer;
   const y = THREE.MathUtils.lerp(yCinturaInicioM, yRuedoPrincipalM, tr);
   const anillo = evaluarPerfilEnY(
     perfil.anillosInterpolados,
@@ -1078,11 +1245,33 @@ function evaluarAnilloFaldaEnTr(
     extraB = drBase + apertura * 1.02;
   }
 
+  // Verificar envolvente real de muslos/rodillas/tobillos opacos por debajo de cadera
+  let envPiernaX = anillo.a + drBase;
+  let envPiernaZ = anillo.b + drBase;
+  if (y < perfil.caderaYM) {
+    const tRod = smoothstep(pierna.musloAlto[1], pierna.rodilla[1], y);
+    const tTob = smoothstep(pierna.rodilla[1], pierna.tobillo[1], y);
+    const legX =
+      y >= pierna.rodilla[1]
+        ? THREE.MathUtils.lerp(Math.abs(pierna.musloAlto[0]), Math.abs(pierna.rodilla[0]), tRod)
+        : THREE.MathUtils.lerp(Math.abs(pierna.rodilla[0]), Math.abs(pierna.tobillo[0]), tTob);
+    const legZ =
+      y >= pierna.rodilla[1]
+        ? THREE.MathUtils.lerp(pierna.musloAlto[2], pierna.rodilla[2], tRod)
+        : THREE.MathUtils.lerp(pierna.rodilla[2], pierna.tobillo[2], tTob);
+    const rPierna =
+      y >= pierna.rodilla[1]
+        ? THREE.MathUtils.lerp(pierna.radioMusloM, pierna.radioRodillaM, tRod)
+        : THREE.MathUtils.lerp(pierna.radioRodillaM, pierna.radioTobilloM, tTob);
+    envPiernaX = legX + rPierna + 0.012;
+    envPiernaZ = Math.abs(legZ - anillo.desplazamientoZ) + rPierna + 0.014;
+  }
+
   return {
     y,
     anillo,
-    aBase: Math.max(anillo.a + drBase, anillo.a + extraA),
-    bBase: Math.max(anillo.b + drBase, anillo.b + extraB),
+    aBase: Math.max(anillo.a + drBase, anillo.a + extraA, envPiernaX),
+    bBase: Math.max(anillo.b + drBase, anillo.b + extraB, envPiernaZ),
     zCentro: anillo.desplazamientoZ,
     circRef,
   };
@@ -1121,7 +1310,8 @@ function construirFaldaYBolero(
 
   const { largoTotalFaldaM, boleroAltoM, yRuedoPrincipalM } = calcularAlturasFalda(
     config,
-    yCinturaInicioM
+    yCinturaInicioM,
+    perfil
   );
   const caderaAnillo = perfil.anillosClave.cadera;
   const drBase = calcularDeltaRadioM(config, yCinturaInicioM, perfil, ajusteStretch);
@@ -1301,45 +1491,55 @@ function calcularInfoPiernasPantalon(
   perfil: PerfilCuerpo,
   config: ConfigPrenda
 ): InfoPiernasPantalon {
+  const piernaRef = perfil.trayectorias.piernaDer;
   const tiroYM = clamp(
     perfil.cinturaYM - perfil.alturaTiroM,
-    perfil.musloYM + 0.02,
+    perfil.musloYM + 0.018,
     perfil.caderaYM - cmAMetros(2)
   );
-  const cadera = perfil.anillosClave.cadera;
-  const rMusloBase = clamp(
-    perfil.contornoMusloM / (2 * Math.PI),
-    0.045,
-    cadera.a * 0.54
+
+  // Partimos de la trayectoria y radios reales de la pierna del maniquí opaco
+  const rMusloBase = Math.max(piernaRef.radioMusloM, cmAMetros(28) / (2 * Math.PI));
+  const rRodillaBase = piernaRef.radioRodillaM;
+  const rTobilloBase = piernaRef.radioTobilloM;
+
+  const yPisoSeguroM = Math.max(0.028, perfil.alturaTobilloM * 0.38);
+  const largoPiernaM = clamp(
+    cmAMetros(config.largoDeseado),
+    0.14,
+    Math.max(0.18, tiroYM - yPisoSeguroM)
   );
-  const xMuslo = Math.max(rMusloBase * 0.96, cadera.a * 0.46);
-  const zMuslo = perfil.anillosClave.muslo.desplazamientoZ;
-  const largoPiernaM = clamp(cmAMetros(config.largoDeseado), 0.14, tiroYM - 0.04);
-  const yBotaM = Math.max(0.04, tiroYM - largoPiernaM);
+  const yBotaM = Math.max(yPisoSeguroM, tiroYM - largoPiernaM);
 
   const rMusloPrenda =
     config.pantalon === "legging"
-      ? rMusloBase + 0.0025
+      ? rMusloBase + 0.0045
       : config.pantalon === "palazzo"
-        ? rMusloBase * 1.24
-        : rMusloBase * 1.1;
+        ? Math.max(rMusloBase * 1.28, rMusloBase + 0.022)
+        : Math.max(rMusloBase * 1.12, rMusloBase + 0.012);
+
   const rRodillaPrenda =
     config.pantalon === "legging"
-      ? rMusloBase * 0.72
+      ? Math.max(rRodillaBase + 0.0045, rMusloBase * 0.72)
       : config.pantalon === "palazzo"
-        ? rMusloBase * 1.32
-        : Math.max(rMusloBase * 0.85, cmAMetros(20) / (2 * Math.PI));
+        ? Math.max(rMusloPrenda * 1.06, rRodillaBase + 0.045)
+        : Math.max(rRodillaBase + 0.014, rMusloBase * 0.84, cmAMetros(20) / (2 * Math.PI));
+
   const rBotaPrenda =
     config.pantalon === "legging"
-      ? rMusloBase * 0.48
+      ? Math.max(rTobilloBase + 0.0045, rMusloBase * 0.48)
       : config.pantalon === "palazzo"
-        ? Math.max(rMusloBase * 1.44, perfil.anchoBotaM / Math.PI)
-        : clamp(perfil.anchoBotaM / Math.PI, rMusloBase * 0.68, rMusloBase * 1.18);
+        ? Math.max(rRodillaPrenda * 1.1, perfil.anchoBotaM / Math.PI, rTobilloBase + 0.068)
+        : clamp(
+            perfil.anchoBotaM / Math.PI,
+            Math.max(rTobilloBase + 0.014, rMusloBase * 0.68),
+            Math.max(rTobilloBase + 0.036, rMusloBase * 1.18)
+          );
 
   return {
     tiroYM,
-    xMuslo,
-    zMuslo,
+    xMuslo: Math.abs(piernaRef.musloAlto[0]),
+    zMuslo: piernaRef.musloAlto[2],
     yBotaM,
     rMusloPrenda,
     rRodillaPrenda,
@@ -1353,24 +1553,57 @@ function evaluarCentroYRadioPierna(
   lado: -1 | 1,
   tr: number
 ): { cx: number; y: number; cz: number; radio: number } {
-  const y = THREE.MathUtils.lerp(info.tiroYM + 0.03, info.yBotaM, tr);
-  const tRod = smoothstep(info.tiroYM, perfil.alturaRodillaM, y);
-  const tTob = smoothstep(perfil.alturaRodillaM, perfil.alturaTobilloM, y);
-  const cx = lado * (info.xMuslo * (1 - 0.14 * tRod - 0.08 * tTob));
-  const cz = info.zMuslo + 0.008 * (tRod - tTob);
+  const pierna = lado < 0 ? perfil.trayectorias.piernaIzq : perfil.trayectorias.piernaDer;
+  const y = THREE.MathUtils.lerp(info.tiroYM + 0.025, info.yBotaM, tr);
+
+  const tLinCaderaRod = clamp(
+    (pierna.cadera[1] - y) / Math.max(0.05, pierna.cadera[1] - pierna.rodilla[1]),
+    0,
+    1
+  );
+  const tLinRodTob = clamp(
+    (pierna.rodilla[1] - y) / Math.max(0.05, pierna.rodilla[1] - pierna.tobillo[1]),
+    0,
+    1
+  );
+  const tRod = smoothstep(pierna.musloAlto[1], pierna.rodilla[1], y);
+
+  let cx: number;
+  let cz: number;
+  let rCuerpoY: number;
+
+  if (y >= pierna.rodilla[1]) {
+    cx = THREE.MathUtils.lerp(pierna.cadera[0], pierna.rodilla[0], tLinCaderaRod);
+    cz = THREE.MathUtils.lerp(pierna.cadera[2], pierna.rodilla[2], tLinCaderaRod);
+    rCuerpoY = THREE.MathUtils.lerp(pierna.radioMusloM, pierna.radioRodillaM, tLinCaderaRod);
+  } else {
+    cx = THREE.MathUtils.lerp(pierna.rodilla[0], pierna.tobillo[0], tLinRodTob);
+    cz = THREE.MathUtils.lerp(pierna.rodilla[2], pierna.tobillo[2], tLinRodTob);
+    // Volumen de pantorrilla coherente con LatheGeometry del maniquí
+    const curvaGemelo = Math.sin(clamp(tLinRodTob * 1.45, 0, Math.PI)) * 0.08 * pierna.radioRodillaM;
+    rCuerpoY =
+      THREE.MathUtils.lerp(pierna.radioRodillaM, pierna.radioTobilloM, tLinRodTob) + curvaGemelo;
+  }
 
   let radio: number;
-  if (y >= perfil.alturaRodillaM) {
+  if (y >= pierna.rodilla[1]) {
     radio = THREE.MathUtils.lerp(info.rMusloPrenda, info.rRodillaPrenda, tRod);
   } else {
     const fBot = clamp(
-      (perfil.alturaRodillaM - y) / Math.max(0.05, perfil.alturaRodillaM - perfil.alturaTobilloM),
+      (pierna.rodilla[1] - y) / Math.max(0.05, pierna.rodilla[1] - info.yBotaM),
       0,
       1
     );
     radio = THREE.MathUtils.lerp(info.rRodillaPrenda, info.rBotaPrenda, fBot);
   }
-  return { cx, y, cz, radio };
+
+  const holguraMin = configHolguraPierna(info, rCuerpoY);
+  return { cx, y, cz, radio: Math.max(radio, holguraMin) };
+}
+
+function configHolguraPierna(info: InfoPiernasPantalon, rCuerpoY: number): number {
+  const esHolgado = info.rBotaPrenda > info.rMusloPrenda * 0.9;
+  return rCuerpoY + (esHolgado ? 0.011 : 0.004);
 }
 
 /**
@@ -1405,10 +1638,15 @@ function construirPantalon(
     const extraPalazzo = config.pantalon === "palazzo" ? tr * cmAMetros(2.8) : 0;
     const dr =
       (config.pantalon === "legging"
-        ? 0.0022
+        ? 0.0045
         : calcularDeltaRadioM(config, y, perfil, ajusteStretch)) + extraPalazzo;
 
-    const a = anillo.a + dr;
+    const piernaHip = perfil.trayectorias.piernaDer;
+    const minYugoA =
+      y <= piernaHip.cadera[1] + 0.02
+        ? Math.abs(piernaHip.cadera[0]) + piernaHip.radioCaderaM + 0.005
+        : 0;
+    const a = Math.max(anillo.a + dr, minYugoA);
     const b = anillo.b + dr;
     const circ = Math.PI * (a + b);
 
@@ -1448,7 +1686,10 @@ function construirPantalon(
   const ringsLeg = opciones.nivelDetalle === "movil" ? 14 : 20;
   const segsLeg = opciones.nivelDetalle === "movil" ? 20 : 26;
 
+  const holguraMinSeg = config.pantalon === "legging" ? 0.005 : 0.011;
+
   for (const lado of [-1, 1] as const) {
+    const pierna = lado < 0 ? perfil.trayectorias.piernaIzq : perfil.trayectorias.piernaDer;
     const lPos: number[] = [];
     const lUvs: number[] = [];
     const lIdx: number[] = [];
@@ -1465,7 +1706,39 @@ function construirPantalon(
         if (config.pantalon === "palazzo") {
           rOnda += Math.sin(10 * theta) * cmAMetros(1.1) * Math.pow(tr, 1.4);
         }
-        lPos.push(cx + rOnda * Math.sin(theta), y, cz + rOnda * Math.cos(theta));
+        let pxRaw = cx + rOnda * Math.sin(theta);
+        let pzRaw = cz + rOnda * Math.cos(theta);
+
+        // En pantalones anchos (palazzo/recto) cada pierna cae sin cruzar la línea media x=0 sobre la pierna opuesta
+        const distAlCentroX = lado * pxRaw;
+        if (distAlCentroX < 0.004) {
+          const excesoInterno = 0.004 - distAlCentroX;
+          pxRaw = lado * 0.004;
+          const signoZ = pzRaw >= cz ? 1 : -1;
+          pzRaw += signoZ * excesoInterno * 0.45;
+        }
+
+        const trasMuslo = proyectarFueraDeSegmento(
+          pxRaw,
+          y,
+          pzRaw,
+          pierna.cadera,
+          pierna.rodilla,
+          pierna.radioMusloM,
+          pierna.radioRodillaM,
+          holguraMinSeg
+        );
+        const trasPant = proyectarFueraDeSegmento(
+          trasMuslo.x,
+          trasMuslo.y,
+          trasMuslo.z,
+          pierna.rodilla,
+          pierna.tobillo,
+          pierna.radioRodillaM,
+          pierna.radioTobilloM,
+          holguraMinSeg
+        );
+        lPos.push(trasPant.x, trasPant.y, trasPant.z);
         lUvs.push((theta / (Math.PI * 2)) * circ, y);
         lPesos[r * (segsLeg + 1) + s] =
           config.pantalon === "palazzo" ? Math.pow(tr, 1.5) * 0.85 : config.pantalon === "recto" ? tr * 0.25 : 0;
@@ -1643,48 +1916,36 @@ function construirCinturonConLazo(
 
 /**
  * Construye Sombrero Pescador (`bucketHat`) con corona + ala inclinada (`LatheGeometry`)
- * montado sobre una cabeza estilizada del contorno real (~57 cm).
+ * montado directamente sobre la cabeza ovoide del maniquí articulado.
  */
 function construirBucketHat(
   perfil: PerfilCuerpo,
   opciones: OpcionesMallaPrenda
 ): { objetos: THREE.Object3D[]; etiquetaFrente: Etiqueta3DAncla } {
   const objetos: THREE.Object3D[] = [];
-  const rCabeza = clamp(perfil.contornoCabezaM / (2 * Math.PI), 0.072, 0.105);
-  const cuello = perfil.anillosClave.cuello;
-  const centroCabezaY = perfil.cuelloYM + rCabeza * 1.38;
-  const centroCabezaZ = cuello.desplazamientoZ + 0.008;
+  const { centroCabeza, radioCabezaX, radioCabezaY, radioCabezaZ } = perfil.trayectorias;
+  const rBaseX = radioCabezaX * 1.045;
+  const factorElipseZ = clamp(radioCabezaZ / Math.max(0.04, radioCabezaX), 0.96, 1.25);
 
-  // Cabeza estilizada guía translúcida
-  const cabezaGeo = new THREE.SphereGeometry(rCabeza, 28, 22);
-  cabezaGeo.scale(0.88, 1.15, 0.98);
-  const cabezaMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color("#D8CEC0"),
-    roughness: 0.72,
-    transparent: true,
-    opacity: 0.35,
-    depthWrite: false,
-  });
-  const cabezaMesh = new THREE.Mesh(cabezaGeo, cabezaMat);
-  cabezaMesh.position.set(0, centroCabezaY, centroCabezaZ);
-  cabezaMesh.name = "cabeza-guia-hat";
-  objetos.push(cabezaMesh);
+  const centroCabezaY = centroCabeza[1];
+  const centroCabezaZ = centroCabeza[2];
 
-  // Sombrero con corona plana y ala inclinada (~6 cm) en LatheGeometry
-  const rCopaTop = rCabeza * 0.92;
-  const rBaseCopa = rCabeza * 1.04;
-  const rAla = rBaseCopa + cmAMetros(6.0);
+  // Sombrero con corona plana y ala inclinada (~6 cm) en LatheGeometry ovalada al cráneo
+  const rCopaTop = rBaseX * 0.91;
+  const rAla = rBaseX + cmAMetros(6.0);
 
   const perfilHat = [
-    new THREE.Vector2(0, cmAMetros(9.2)),
-    new THREE.Vector2(rCopaTop, cmAMetros(9.0)),
-    new THREE.Vector2(rCopaTop * 1.02, cmAMetros(8.6)),
-    new THREE.Vector2(rBaseCopa, cmAMetros(1.2)),
-    new THREE.Vector2(rBaseCopa + cmAMetros(0.4), cmAMetros(0.8)),
+    new THREE.Vector2(0, cmAMetros(8.6)),
+    new THREE.Vector2(rCopaTop, cmAMetros(8.4)),
+    new THREE.Vector2(rCopaTop * 1.02, cmAMetros(8.0)),
+    new THREE.Vector2(rBaseX, cmAMetros(1.0)),
+    new THREE.Vector2(rBaseX + cmAMetros(0.4), cmAMetros(0.6)),
     new THREE.Vector2(rAla, -cmAMetros(3.4)),
   ];
 
   const hatGeo = new THREE.LatheGeometry(perfilHat, 44);
+  hatGeo.scale(1, 1, factorElipseZ);
+
   // Escalar UVs al patrón de 8 cm reales
   const uv = hatGeo.getAttribute("uv");
   const circAla = Math.PI * 2 * rAla;
@@ -1697,7 +1958,12 @@ function construirBucketHat(
   finalizarGeometria(hatGeo);
 
   const hatMesh = new THREE.Mesh(hatGeo, opciones.materialPrincipal);
-  hatMesh.position.set(0, centroCabezaY + rCabeza * 0.14, centroCabezaZ);
+  hatMesh.position.set(
+    centroCabeza[0],
+    centroCabezaY + radioCabezaY * 0.24,
+    centroCabezaZ - cmAMetros(0.3)
+  );
+  hatMesh.rotation.x = -0.04;
   hatMesh.name = "bucket-hat-3d";
   registrarMalla(hatMesh);
   objetos.push(hatMesh);
@@ -1707,7 +1973,11 @@ function construirBucketHat(
     etiquetaFrente: {
       id: "lbl-delantero",
       texto: "Delantero",
-      posicionLocalM: [0, centroCabezaY + rCabeza * 0.45, centroCabezaZ + rBaseCopa + 0.02],
+      posicionLocalM: [
+        centroCabeza[0],
+        centroCabezaY + radioCabezaY * 0.5,
+        centroCabezaZ + radioCabezaZ + 0.025,
+      ],
       normalLocal: [0, 0, 1],
     },
   };
@@ -1776,19 +2046,20 @@ function poblarCosturasSombrero(
   grupoCosturas: THREE.Group,
   mat: THREE.LineDashedMaterial
 ): void {
-  const rCabeza = clamp(perfil.contornoCabezaM / (2 * Math.PI), 0.072, 0.105);
-  const cuello = perfil.anillosClave.cuello;
-  const centroCabezaY = perfil.cuelloYM + rCabeza * 1.38;
-  const centroCabezaZ = cuello.desplazamientoZ + 0.008;
-  const hatYBase = centroCabezaY + rCabeza * 0.14;
+  const { centroCabeza, radioCabezaX, radioCabezaY, radioCabezaZ } = perfil.trayectorias;
+  const rBaseX = radioCabezaX * 1.045;
+  const factorElipseZ = clamp(radioCabezaZ / Math.max(0.04, radioCabezaX), 0.96, 1.25);
 
-  const rCopaTop = rCabeza * 0.92;
-  const rBaseCopa = rCabeza * 1.04;
+  const centroCabezaZ = centroCabeza[2] - cmAMetros(0.3);
+  const hatYBase = centroCabeza[1] + radioCabezaY * 0.24;
+
+  const rCopaTop = rBaseX * 0.91;
+  const rBaseCopa = rBaseX;
   const segs = 44;
 
   const anillosHat = [
-    { nombre: "costura-copa-sombrero", radio: rCopaTop * 1.02 + OFFSET_COSTURA_M, y: hatYBase + cmAMetros(8.6) + 0.002 },
-    { nombre: "costura-ala-sombrero", radio: rBaseCopa + cmAMetros(0.4) + OFFSET_COSTURA_M, y: hatYBase + cmAMetros(0.9) + 0.002 },
+    { nombre: "costura-copa-sombrero", radio: rCopaTop * 1.02 + OFFSET_COSTURA_M, y: hatYBase + cmAMetros(8.0) + 0.002 },
+    { nombre: "costura-ala-sombrero", radio: rBaseCopa + cmAMetros(0.4) + OFFSET_COSTURA_M, y: hatYBase + cmAMetros(0.8) + 0.002 },
   ];
 
   for (const anillo of anillosHat) {
@@ -1797,9 +2068,9 @@ function poblarCosturasSombrero(
       const th = (s / segs) * Math.PI * 2;
       pts.push(
         new THREE.Vector3(
-          anillo.radio * Math.sin(th),
+          centroCabeza[0] + anillo.radio * Math.sin(th),
           anillo.y,
-          centroCabezaZ + anillo.radio * Math.cos(th)
+          centroCabezaZ + anillo.radio * factorElipseZ * Math.cos(th)
         )
       );
     }
@@ -1811,8 +2082,8 @@ function poblarCosturasSombrero(
     for (let i = 0; i <= 6; i++) {
       const t = i / 6;
       const r = THREE.MathUtils.lerp(rCopaTop, rBaseCopa, t) + OFFSET_COSTURA_M;
-      const y = THREE.MathUtils.lerp(cmAMetros(8.6), cmAMetros(1.2), t) + hatYBase;
-      pts.push(new THREE.Vector3(lado * r, y, centroCabezaZ));
+      const y = THREE.MathUtils.lerp(cmAMetros(8.0), cmAMetros(1.0), t) + hatYBase;
+      pts.push(new THREE.Vector3(centroCabeza[0] + lado * r, y, centroCabezaZ));
     }
     grupoCosturas.add(
       crearLineaPespunte(pts, mat, `costura-lateral-copa-${lado > 0 ? "izq" : "der"}`)
@@ -2077,7 +2348,8 @@ function poblarCosturasFalda(
 ): { etiquetaPinza?: Etiqueta3DAncla } {
   const { largoTotalFaldaM, yRuedoPrincipalM } = calcularAlturasFalda(
     config,
-    yInicioFaldaM
+    yInicioFaldaM,
+    perfil
   );
   const drBase = calcularDeltaRadioM(config, yInicioFaldaM, perfil, ajusteStretchM);
 
@@ -2187,7 +2459,8 @@ function poblarCosturasPantalon(
           ? Math.sin(10 * (-lado * Math.PI * 0.5)) * cmAMetros(1.1) * Math.pow(tr, 1.4)
           : 0;
       ptsExt.push(new THREE.Vector3(cx + lado * (radio + ondaExt + OFFSET_COSTURA_M), y, cz));
-      ptsInt.push(new THREE.Vector3(cx - lado * (radio + ondaInt + OFFSET_COSTURA_M), y, cz));
+      const xIntBase = lado * Math.max(0.004, Math.abs(cx) - (radio + ondaInt));
+      ptsInt.push(new THREE.Vector3(xIntBase - lado * OFFSET_COSTURA_M * 0.5, y, cz));
     }
     grupoCosturas.add(
       crearLineaPespunte(ptsExt, mat, `costura-costado-pierna-${lado > 0 ? "izq" : "der"}`)
