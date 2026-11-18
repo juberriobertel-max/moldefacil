@@ -28,6 +28,17 @@ import {
   upsertMeasurementProfile,
 } from "@/lib/savedMeasurements";
 import { Measurements } from "@/lib/types";
+import {
+  CURRENCIES,
+  CurrencyCode,
+  formatMoney,
+  getCurrencyConfig,
+  getWorkshopCurrencyServerSnapshot,
+  isValidCurrencyCode,
+  loadWorkshopCurrency,
+  saveWorkshopCurrency,
+  subscribeWorkshopCurrency,
+} from "@/lib/currency";
 
 const ORDER_STATUSES: ClientOrderStatus[] = [
   "En proceso",
@@ -41,10 +52,6 @@ const STATUS_BADGE_CLASS: Record<ClientOrderStatus, string> = {
   Entregada: "bg-emerald-50 text-emerald-800 border-emerald-200",
 };
 
-function formatCurrency(val: number): string {
-  return `$ ${Math.round(val).toLocaleString("es-CO")}`;
-}
-
 const emptySubscribe = () => () => {};
 
 export default function ClientOrdersLedger() {
@@ -53,6 +60,12 @@ export default function ClientOrdersLedger() {
     () => true,
     () => false
   );
+  const workshopCurrency = useSyncExternalStore(
+    subscribeWorkshopCurrency,
+    loadWorkshopCurrency,
+    getWorkshopCurrencyServerSnapshot
+  );
+  const currencyConfig = getCurrencyConfig(workshopCurrency);
   const [statusFilter, setStatusFilter] = useState<"Todos" | ClientOrderStatus>(
     "Todos"
   );
@@ -75,8 +88,16 @@ export default function ClientOrdersLedger() {
   const [garmentDescription, setGarmentDescription] = useState("");
   const [fabricNotes, setFabricNotes] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
-  const [totalPrice, setTotalPrice] = useState<string>("120000");
-  const [depositPaid, setDepositPaid] = useState<string>("60000");
+  const [totalPriceOverride, setTotalPriceOverride] = useState<string | null>(
+    null
+  );
+  const [depositPaidOverride, setDepositPaidOverride] = useState<string | null>(
+    null
+  );
+  const totalPrice =
+    totalPriceOverride ?? String(currencyConfig.defaults.orderTotal);
+  const depositPaid =
+    depositPaidOverride ?? String(currencyConfig.defaults.orderDeposit);
   const [status, setStatus] = useState<ClientOrderStatus>("En proceso");
 
   // Quick New Measurement Profile modal/inline panel
@@ -90,16 +111,28 @@ export default function ClientOrdersLedger() {
     const readyFitting = orders.filter(
       (o) => o.status === "Lista para prueba"
     ).length;
-    const pendingBalance = orders.reduce(
-      (acc, o) => acc + Math.max(0, o.totalPrice - o.depositPaid),
-      0
-    );
+
+    const pendingByCurrency = new Map<CurrencyCode, number>();
+    for (const order of orders) {
+      const pending = Math.max(0, order.totalPrice - order.depositPaid);
+      if (pending <= 0) continue;
+      const code = order.currency ?? workshopCurrency;
+      pendingByCurrency.set(code, (pendingByCurrency.get(code) ?? 0) + pending);
+    }
+
+    const pendingLabel =
+      pendingByCurrency.size === 0
+        ? formatMoney(0, workshopCurrency)
+        : Array.from(pendingByCurrency.entries())
+            .map(([code, val]) => formatMoney(val, code))
+            .join(" • ");
+
     return {
       activeCount: active.length,
       readyFitting,
-      pendingBalance,
+      pendingLabel,
     };
-  }, [orders]);
+  }, [orders, workshopCurrency]);
 
   const filteredOrders = useMemo(() => {
     if (statusFilter === "Todos") return orders;
@@ -142,6 +175,7 @@ export default function ClientOrdersLedger() {
       deliveryDate,
       totalPrice: Number(totalPrice) || 0,
       depositPaid: Number(depositPaid) || 0,
+      currency: workshopCurrency,
       status,
     });
 
@@ -152,8 +186,8 @@ export default function ClientOrdersLedger() {
     setGarmentDescription("");
     setFabricNotes("");
     setDeliveryDate("");
-    setTotalPrice("120000");
-    setDepositPaid("60000");
+    setTotalPriceOverride(null);
+    setDepositPaidOverride(null);
     setStatus("En proceso");
     setShowQuickProfile(false);
   };
@@ -193,7 +227,10 @@ export default function ClientOrdersLedger() {
 
     const balanceLine =
       pending > 0
-        ? `\n💳 Saldo pendiente al entregar: ${formatCurrency(pending)}`
+        ? `\n💳 Saldo pendiente al entregar: ${formatMoney(
+            pending,
+            order.currency ?? workshopCurrency
+          )}`
         : "\n✅ Pago completado en su totalidad.";
 
     const message = `Hola ${order.clientName} 👋\n${statusLine}${balanceLine}\n¿A qué hora te queda bien pasar por el taller? ✂️🧵`;
@@ -231,8 +268,8 @@ export default function ClientOrdersLedger() {
           <span className="block text-xs font-bold text-teal-700">
             Saldo total por cobrar
           </span>
-          <strong className="text-2xl font-black text-teal-700">
-            {formatCurrency(summary.pendingBalance)}
+          <strong className="text-xl sm:text-2xl font-black text-teal-700">
+            {summary.pendingLabel}
           </strong>
         </div>
       </div>
@@ -400,28 +437,55 @@ export default function ClientOrdersLedger() {
             </div>
           </div>
 
+          <div>
+            <label
+              htmlFor="ledger-currency-select"
+              className="block text-sm font-bold text-slate-700 mb-1"
+            >
+              Moneda del encargo
+            </label>
+            <select
+              id="ledger-currency-select"
+              value={workshopCurrency}
+              onChange={(e) => {
+                if (isValidCurrencyCode(e.target.value)) {
+                  saveWorkshopCurrency(e.target.value);
+                }
+              }}
+              className="w-full min-h-[44px] px-3.5 rounded-2xl bg-[#FAF8F5] border border-slate-300 text-sm font-bold text-slate-800 cursor-pointer"
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.shortLabel} — {c.name} ({c.country})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">
-                Precio total ($)
+                Precio total ({currencyConfig.shortLabel})
               </label>
               <input
                 type="number"
+                step="any"
                 min={0}
                 value={totalPrice}
-                onChange={(e) => setTotalPrice(e.target.value)}
+                onChange={(e) => setTotalPriceOverride(e.target.value)}
                 className="w-full min-h-[46px] px-3.5 rounded-2xl bg-[#FAF8F5] border border-slate-300 text-sm font-bold text-slate-900"
               />
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">
-                Abono recibido ($)
+                Abono recibido ({currencyConfig.shortLabel})
               </label>
               <input
                 type="number"
+                step="any"
                 min={0}
                 value={depositPaid}
-                onChange={(e) => setDepositPaid(e.target.value)}
+                onChange={(e) => setDepositPaidOverride(e.target.value)}
                 className="w-full min-h-[46px] px-3.5 rounded-2xl bg-[#FAF8F5] border border-slate-300 text-sm font-bold text-slate-900"
               />
             </div>
@@ -430,11 +494,12 @@ export default function ClientOrdersLedger() {
           <div className="p-3 rounded-2xl bg-teal-50 border border-teal-200 flex items-center justify-between text-sm">
             <span className="font-bold text-teal-900">Saldo pendiente automático:</span>
             <strong className="text-base text-teal-800">
-              {formatCurrency(
+              {formatMoney(
                 Math.max(
                   0,
                   (Number(totalPrice) || 0) - (Number(depositPaid) || 0)
-                )
+                ),
+                workshopCurrency
               )}
             </strong>
           </div>
@@ -569,7 +634,10 @@ export default function ClientOrdersLedger() {
                           Total
                         </span>
                         <strong className="text-slate-900">
-                          {formatCurrency(order.totalPrice)}
+                          {formatMoney(
+                            order.totalPrice,
+                            order.currency ?? workshopCurrency
+                          )}
                         </strong>
                       </div>
                       <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
@@ -577,7 +645,10 @@ export default function ClientOrdersLedger() {
                           Abonado
                         </span>
                         <strong className="text-emerald-700">
-                          {formatCurrency(order.depositPaid)}
+                          {formatMoney(
+                            order.depositPaid,
+                            order.currency ?? workshopCurrency
+                          )}
                         </strong>
                       </div>
                       <div className="p-2.5 rounded-xl bg-teal-50 border border-teal-200">
@@ -585,7 +656,10 @@ export default function ClientOrdersLedger() {
                           Saldo
                         </span>
                         <strong className="text-teal-900">
-                          {formatCurrency(pending)}
+                          {formatMoney(
+                            pending,
+                            order.currency ?? workshopCurrency
+                          )}
                         </strong>
                       </div>
                       <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">

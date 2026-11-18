@@ -1,4 +1,5 @@
 import { Measurements, PatternResult } from "./types";
+import { CurrencyCode } from "./currency";
 
 export const PROFILES_STORAGE_KEY = "moldefacil_perfiles_medidas";
 export const ORDERS_STORAGE_KEY = "moldefacil_pedidos_taller";
@@ -28,6 +29,7 @@ export interface ClientOrder {
   deliveryDate: string;
   totalPrice: number;
   depositPaid: number;
+  currency?: CurrencyCode;
   status: ClientOrderStatus;
   createdAt: string;
   updatedAt: string;
@@ -199,6 +201,7 @@ export function upsertClientOrder(
     deliveryDate: order.deliveryDate,
     totalPrice: Math.max(0, Number(order.totalPrice) || 0),
     depositPaid: Math.max(0, Number(order.depositPaid) || 0),
+    currency: order.currency || existing?.currency,
     status: order.status,
     createdAt: existing?.createdAt || order.createdAt || now,
     updatedAt: now,
