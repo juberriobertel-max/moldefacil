@@ -1,3 +1,6 @@
+import type { IllustrationKind } from "@/components/blog/SewingIllustration";
+import type { WidgetKind } from "@/components/blog/ArticleWidgets";
+
 export type BlogCategory =
   | "Patronaje"
   | "Telas y Materiales"
@@ -11,43 +14,48 @@ export type SvgDiagramKind =
   | "clean-finishes"
   | "pattern-adaptations";
 
-export type BlogContentBlock =
+export type ContentBlock =
   | {
-      type: "heading";
-      text: string;
+      type: "resumen_rapido";
+      puntos: string[];
     }
   | {
-      type: "paragraph";
-      text: string;
+      type: "subtitulo";
+      texto: string;
     }
   | {
-      type: "tip";
-      title: string;
-      text: string;
-      tone?: "teal" | "rose" | "amber";
+      type: "parrafo";
+      texto: string;
     }
   | {
-      type: "checklist";
-      title: string;
-      items: string[];
+      type: "truco_taller";
+      titulo?: string;
+      texto: string;
     }
   | {
-      type: "table";
-      caption: string;
-      headers: string[];
-      rows: string[][];
+      type: "alerta_tijera";
+      titulo?: string;
+      texto: string;
     }
   | {
-      type: "interactiveFabricTable";
-      title: string;
-      note: string;
+      type: "ilustracion_svg";
+      tipo: IllustrationKind;
+      titulo?: string;
+      nota?: string;
     }
   | {
-      type: "svgDiagram";
-      diagram: SvgDiagramKind;
-      title: string;
-      caption: string;
+      type: "widget_interactivo";
+      widget: WidgetKind;
+      titulo?: string;
+    }
+  | {
+      type: "tabla_comparativa";
+      titulo: string;
+      encabezados: string[];
+      filas: string[][];
     };
+
+export type BlogContentBlock = ContentBlock;
 
 export interface GeneratorAction {
   label: string;
@@ -68,7 +76,7 @@ export interface BlogPost {
   fecha: string;
   resumenSEO: string;
   palabrasClave: string[];
-  contenidoEstructurado: BlogContentBlock[];
+  contenidoEstructurado: ContentBlock[];
   accionGenerador: GeneratorAction;
 }
 
@@ -86,12 +94,12 @@ export const BLOG_POSTS: BlogPost[] = [
     titulo:
       "Tabla definitiva: ¿Cuánta tela comprar según la prenda y la talla? (XS a XL)",
     subtitulo:
-      "Deja de gastar dinero de más en el almacén de telas o quedarte corta a mitad del corte. Compara rollos de 140 cm y 150 cm en segundos.",
+      "Calcula en segundos los metros exactos para rollos de 150 cm, 140 cm o 115 cm sin gastar dinero de más ni quedarte corta en la mesa de corte.",
     categoria: "Telas y Materiales",
     tiempoLectura: "6 min",
     fecha: "2026-11-10",
     resumenSEO:
-      "Guía práctica y tabla interactiva para calcular exactamente cuántos metros de tela comprar de la talla XS a la XL según el ancho del rollo (140 cm o 150 cm).",
+      "Calculadora interactiva y tabla por tallas (XS a XL) para saber cuántos metros de tela comprar en ancho 150 cm y 140 cm según la prenda.",
     palabrasClave: [
       "cuánta tela comprar",
       "metros de tela por talla",
@@ -100,46 +108,65 @@ export const BLOG_POSTS: BlogPost[] = [
     ],
     contenidoEstructurado: [
       {
-        type: "paragraph",
-        text: "Una de las preguntas que más estrés genera frente al mostrador de telas es: '¿Con metro y medio me alcanza o mejor llevo dos metros?'. Si compras de menos, pierdes el proyecto entero porque cuando vuelves por otro pedazo el tono del rollo ya cambió. Si compras de más, terminas con bolsas llenas de retazos caros que nunca usas.",
-      },
-      {
-        type: "paragraph",
-        text: "La cantidad exacta depende de tres cosas: tu talla (sobre todo el contorno de cadera y busto), el largo de la prenda y el ancho útil del rollo. La gran mayoría de telas de moda vienen de 140 cm o 150 cm de ancho, y esos 10 centímetros de diferencia determinan si dos piezas caben lado a lado o si tienes que comprar un largo extra.",
-      },
-      {
-        type: "interactiveFabricTable",
-        title: "Calculadora rápida: Elige tu talla y el ancho de la tela",
-        note: "Los valores incluyen margen de costura estándar (1 a 1.5 cm) y tolerancia para encuadrar el hilo de la tela.",
-      },
-      {
-        type: "heading",
-        text: "3 casos en los que SÍ debes sumar de 25 a 50 cm extra",
-      },
-      {
-        type: "checklist",
-        title: "Checklist antes de pagar en el almacén",
-        items: [
-          "Telas que encogen (lino, algodón 100%, rayón o chalis): suma 15 cm extra por cada metro para poder prelavar la tela antes de cortar.",
-          "Estampados con dirección, cuadros grandes o rayas: necesitarás mover las piezas para casar las líneas en costados y centros (+30 a +50 cm).",
-          "Telas con pelo o brillo unidireccional (terciopelo, pana, satén pesado): todas las piezas deben cortarse mirando hacia el mismo lado, nunca invertidas.",
-          "Detalles extra como bolsillos grandes, vuelos/boleros en el bajo, mangas globo o cinturones largos (+30 a +60 cm).",
+        type: "resumen_rapido",
+        puntos: [
+          "Blusa básica (XS–M): 1.10 m en tela de 150 cm; en tallas L–XL lleva de 1.45 m a 1.65 m.",
+          "Vestido midi o pantalón recto (talla M): 1.80 m a 2.20 m en doble ancho (150 cm).",
+          "Suma siempre +15 cm por metro si es lino, rayón o algodón 100% porque encogen al primer lavado.",
         ],
       },
       {
-        type: "tip",
-        title: "Truco de taller para ahorrar tela sin perder calidad",
-        text: "Si vas a hacer una blusa o vestido en talla L o XL y la tela mide solo 140 cm, no dobles la tela exactamente por la mitad. Dóblala de forma asimétrica solo al ancho que necesita la pieza del delantero o la espalda; así dejas una franja lateral entera para cortar mangas, cuello, vista y cinturón.",
-        tone: "teal",
+        type: "parrafo",
+        texto: "Cuando estás frente al mostrador de telas, dudar por 30 centímetros sale caro: si llevas de menos ya no consigues el mismo lote de color, y si compras a ojo terminas acumulando retazos costosos.",
+      },
+      {
+        type: "widget_interactivo",
+        widget: "calculador_tela",
+      },
+      {
+        type: "subtitulo",
+        texto: "¿Por qué cambia tanto el consumo entre 140 cm y 150 cm?",
+      },
+      {
+        type: "parrafo",
+        texto: "Esos 10 centímetros extra del rollo de 150 cm permiten que en tallas M y L el delantero y la espalda quepan uno al lado del otro al doblar la tela. En telas de 140 cm o 115 cm toca acomodar una pieza debajo de la otra.",
+      },
+      {
+        type: "ilustracion_svg",
+        tipo: "doblez-tela",
+        titulo: "Cómo apoyar tus moldes sobre el doblez para no desperdiciar tela",
+        nota: "Apoya siempre el centro del delantero o espalda ras con ras sobre el lomo doblado, sin agregar margen en ese borde.",
+      },
+      {
+        type: "alerta_tijera",
+        titulo: "⚠️ ¡Cuidado antes de cortar telas naturales!",
+        texto: "Nunca cortes lino, chalis, viscosa ni popelina de algodón sin haberlos mojado y planchado antes. Pueden encoger entre un 5% y un 8% a lo largo en la primera lavada.",
+      },
+      {
+        type: "tabla_comparativa",
+        titulo: "Referencia rápida de metros en rollo de 150 cm vs. 140 cm",
+        encabezados: ["Prenda", "Tallas XS – M (150 cm)", "Tallas L – XL (150 cm)", "Extra en 140 cm"],
+        filas: [
+          ["Blusa manga corta", "1.00 – 1.20 m", "1.40 – 1.60 m", "+0.15 a +0.25 m"],
+          ["Blusa manga larga / Kimono", "1.35 – 1.55 m", "1.75 – 1.95 m", "+0.20 m"],
+          ["Falda recta a la rodilla", "0.85 – 0.95 m", "1.15 – 1.35 m", "+0.15 m"],
+          ["Pantalón recto o Palazzo", "1.50 – 1.75 m", "2.05 – 2.30 m", "+0.25 m"],
+          ["Vestido cruzado midi", "1.90 – 2.20 m", "2.45 – 2.75 m", "+0.30 m"],
+        ],
+      },
+      {
+        type: "truco_taller",
+        titulo: "💡 Truco de Taller: El doblez asimétrico",
+        texto: "Si solo necesitas doblar 28 cm para sacar el delantero, no dobles todo el rollo de 150 cm por la mitad. Dobla solo esos 28 cm y te quedará una franja libre de 94 cm de ancho para sacar mangas, vistas y cinturón de una sola vez.",
       },
     ],
     accionGenerador: {
-      label: "Hacer este molde con mis medidas ahora →",
+      label: "Abrir el Generador con esta prenda →",
       description:
-        "MoldeFácil calcula en tiempo real los metros exactos de tela (140 cm y 150 cm) con tus medidas reales antes de ir a comprar.",
+        "MoldeFácil calcula en vivo los metros exactos según tus medidas reales de busto, cintura, cadera y largo.",
       href: "/?prenda=vestido&estilo=cruzado",
       secondaryLink: {
-        label: "Probar Simulador de Plan de Corte",
+        label: "Simular Plan de Corte en Mi Taller",
         href: "/taller?tab=corte",
       },
     },
@@ -149,12 +176,12 @@ export const BLOG_POSTS: BlogPost[] = [
     titulo:
       "Cómo tomar las 10 medidas corporales exactas sin ayuda (Guía paso a paso)",
     subtitulo:
-      "Un molde perfecto empieza por una cinta métrica bien puesta. Aprende dónde medir sin apretar, frente al espejo y con resultados repetibles.",
+      "El método del cordón en la cintura y la silla plana para medirte frente al espejo con precisión de sastrería.",
     categoria: "Patronaje",
     tiempoLectura: "7 min",
     fecha: "2026-11-11",
     resumenSEO:
-      "Aprende a tomarte sola las 10 medidas esenciales de costura (busto, cintura, cadera, talle, tiro y más) con diagrama anatómico paso a paso.",
+      "Guía ilustrada de frente y perfil para tomar las 10 medidas corporales de costura (busto, cintura, cadera, talle y tiro) sin ayuda.",
     palabrasClave: [
       "como tomar medidas para costura",
       "medidas corporales patronaje",
@@ -163,91 +190,102 @@ export const BLOG_POSTS: BlogPost[] = [
     ],
     contenidoEstructurado: [
       {
-        type: "paragraph",
-        text: "El 80% de las prendas que 'no quedan bien' fallaron antes de tocar la tijera: la cinta métrica estaba torcida en la espalda, apretaste demasiado en la cintura o mediste con ropa gruesa encima. Para lograr medidas reales, ponte ropa interior cómoda (o una licra pegada), párate frente a un espejo con postura natural y ata un cordón fino o elástico suave alrededor de tu cintura natural.",
+        type: "resumen_rapido",
+        puntos: [
+          "Ata un cordón o elástico fino en tu cintura natural antes de empezar: será tu línea cero para todo.",
+          "Mide en ropa interior o licra ajustada, mirando al frente sin inclinar la cabeza hacia el metro.",
+          "La cinta debe quedar al ras de la piel sin apretar: el margen de holgura ya lo pone el molde.",
+        ],
       },
       {
-        type: "svgDiagram",
-        diagram: "body-measurements",
-        title: "Mapa visual de las 10 medidas de MoldeFácil",
-        caption:
-          "Usa un elástico delgado en la cintura como punto de referencia fijo para medir talle, falda y altura de tiro sin errores.",
+        type: "parrafo",
+        texto: "El 80% de los moldes que quedan grandes en la espalda o apretados en la cadera fallaron en la toma de medidas. Cuando te mides sola y bajas la barbilla para mirar el número, tu torso se encorva y el talle pierde hasta 3 centímetros.",
       },
       {
-        type: "heading",
-        text: "Paso a paso para cada medida (sin ayuda)",
+        type: "ilustracion_svg",
+        tipo: "medidas-cuerpo",
+        titulo: "Mapa visual de frente y perfil: dónde pasar la cinta métrica",
+        nota: "Comprueba de perfil en un espejo que las cintas de busto, cintura y cadera estén totalmente horizontales y paralelas al piso.",
       },
       {
-        type: "table",
-        caption: "Guía rápida de las 10 medidas clave",
-        headers: ["Medida", "Dónde pasar la cinta", "Error más común"],
-        rows: [
+        type: "subtitulo",
+        texto: "Las 10 medidas de MoldeFácil explicadas al grano",
+      },
+      {
+        type: "tabla_comparativa",
+        titulo: "Dónde apoyar el metro y cómo evitar el error típico",
+        encabezados: ["Medida", "Recorrido exacto de la cinta", "Qué evitar"],
+        filas: [
           [
             "1. Busto / Pecho",
-            "Por la parte más saliente del busto, manteniendo la cinta horizontal en la espalda.",
-            "Dejar caer la cinta atrás (resta de 2 a 4 cm reales).",
+            "Rodea la espalda recta y pasa por el punto más saliente del pecho.",
+            "Que la cinta se caiga hacia la cintura en la espalda.",
           ],
           [
             "2. Cintura",
-            "Justo sobre el elástico guía, en la parte más estrecha o donde dobla el torso de lado.",
-            "Meter el abdomen al medir; respira normal antes de leer.",
+            "Justo encima del cordón guía donde se marca el quiebre lateral del torso.",
+            "Sumir el abdomen al leer el número; respira normal.",
           ],
           [
             "3. Cadera",
-            "Alrededor de la zona más prominente del glúteo (unos 18-20 cm bajo la cintura).",
-            "Medir en los huesos de la cadera alta y dejar apretado el pantalón.",
+            "Por la parte más saliente de los glúteos (unos 18–20 cm bajo la cintura).",
+            "Medir sobre el hueso alto de la pelvis en vez del glúteo.",
           ],
           [
             "4. Ancho de espalda",
-            "De hueso de hombro a hueso de hombro por detrás, o de pliegue a pliegue de axila.",
-            "Encorvar los hombros hacia adelante al intentar leer el metro.",
+            "De hueso a hueso de hombro por detrás (o de pliegue a pliegue de axila).",
+            "Echar los hombros hacia adelante mientras sostienes la cinta.",
           ],
           [
             "5. Largo de talle",
-            "Desde el punto más alto del hombro (junto al cuello) pasando por el busto hasta la cintura.",
-            "Medir por el costado en lugar de pasar sobre el volumen del busto.",
+            "Desde la base del cuello/hombro, pasando sobre el busto hasta el cordón de cintura.",
+            "Bajar por el costado evitando el volumen del busto.",
           ],
           [
             "6. Largo de manga",
-            "Con el brazo ligeramente doblado, desde la punta del hombro pasando por el codo hasta la muñeca.",
-            "Medir con el brazo estirado (al doblar el codo la manga queda corta).",
+            "Con la mano en la cintura (codo semi-doblado), del hombro a la muñeca.",
+            "Medir con el brazo rígido hacia abajo (quedará corta).",
           ],
           [
             "7. Largo de falda",
-            "Desde la cintura (elástico guía) por el costado hasta el largo deseado (mini, rodilla, midi).",
-            "Inclinar la cabeza hacia abajo para ver la cinta (acorta el torso).",
+            "Desde el cordón de la cintura por el costado hasta la rodilla, midi o tobillo.",
+            "Agacharte para leer el metro en la pierna.",
           ],
           [
             "8. Altura de tiro",
-            "Sentada recta en una silla dura: desde el elástico de la cintura hasta el asiento.",
-            "Medir de pie entre las piernas sin silla (suele quedar tirante al sentarse).",
+            "Sentada recta en silla dura: desde el cordón de la cintura hasta la madera del asiento.",
+            "Intentar medir la curva de entrepierna de pie.",
           ],
           [
             "9. Contorno de muslo",
-            "Alrededor de la parte más ancha del muslo, unos 3 cm bajo la entrepierna.",
-            "Apretar la cinta; deja pasar 1 dedo cómodo si la tela no estira.",
+            "Rodea la parte más gruesa del muslo, 3 cm bajo el pliegue del glúteo.",
+            "Apretar la cinta contra la piel.",
           ],
           [
             "10. Largo de pierna",
-            "Desde el costado de la cintura (o desde la entrepierna para entrepierna) hasta el tobillo.",
-            "Medir descalza si vas a usar el pantalón con tacón o plataforma.",
+            "Por la cara interna de la pierna, desde la entrepierna hasta el tobillo.",
+            "Medir descalza si usarás tacones con ese pantalón.",
           ],
         ],
       },
       {
-        type: "tip",
-        title: "El secreto infalible de la silla para el tiro del pantalón",
-        text: "Para acertar el tiro sin ayuda, siéntate con la espalda recta en una silla de madera o plástico plana (no un sofá blando). Apoya la punta metálica del metro en el asiento al costado de tu cadera y sube hasta el cordón de tu cintura. Esa cifra exacta (por ejemplo 26 o 28 cm) garantiza que el pantalón no tire ni haga bolsas incómodas.",
-        tone: "rose",
+        type: "truco_taller",
+        titulo: "💡 Truco de Taller: Sujeta el cero con cinta de enmascarar",
+        texto: "Cuando midas largos verticales tú sola, pega el extremo '0 cm' de la cinta métrica en la base de tu cuello con un pedacito de cinta de papel y lee el número frente al espejo sin mover los brazos.",
+      },
+      {
+        type: "alerta_tijera",
+        titulo: "⚠️ ¡Cuidado antes de cortar pantalones!",
+        texto: "Nunca sumes centímetros 'por si acaso' a tus medidas corporales antes de meterlas al generador. Si inflas cintura o cadera dos veces, el tiro se desplazará y hará bolsas adelante.",
       },
     ],
     accionGenerador: {
-      label: "Hacer este molde con mis medidas ahora →",
+      label: "Abrir el Generador con esta prenda →",
       description:
-        "Introduce estas 10 medidas en el Paso 2 del Generador y mira cómo las curvas del molde se ajustan a tu cuerpo en vivo.",
+        "Escribe tus medidas reales en centímetros en el Paso 2 y descarga tu molde base calibrado.",
       href: "/?prenda=blusa&estilo=oficina",
       secondaryLink: {
-        label: "Guardar medidas de clientas en Mi Taller",
+        label: "Guardar medidas en la Libreta de Mi Taller",
         href: "/taller?tab=libreta",
       },
     },
@@ -257,12 +295,12 @@ export const BLOG_POSTS: BlogPost[] = [
     titulo:
       "Diccionario de telas para costureras: Rígidas, con caída y elásticas (y qué aguja usar en cada una)",
     subtitulo:
-      "¿La máquina se salta puntadas o frunce la costura? Casi nunca es la máquina: es usar la aguja equivocada para esa tela.",
+      "Selecciona en un toque qué aguja (70/10 a 100/16) y qué largo de puntada poner para que tu máquina cosa suave a la primera.",
     categoria: "Telas y Materiales",
     tiempoLectura: "7 min",
     fecha: "2026-11-12",
     resumenSEO:
-      "Aprende a distinguir telas planas, con caída y elásticas, y consulta la tabla exacta de calibre de agujas (70/10 a 100/16) y puntadas recomendadas.",
+      "Guía interactiva de agujas y puntadas según el tipo de tela: rígidas, fluidas con caída y tejidos de punto o licra.",
     palabrasClave: [
       "que aguja usar para cada tela",
       "telas rigidas y elasticas",
@@ -271,74 +309,57 @@ export const BLOG_POSTS: BlogPost[] = [
     ],
     contenidoEstructurado: [
       {
-        type: "paragraph",
-        text: "En MoldeFácil te pedimos elegir entre 'Tela rígida (tejido plano)' y 'Tela elástica (punto/licra)' porque el comportamiento de las fibras cambia por completo las holguras del patrón. Una tela rígida necesita pinzas y centímetros extra para respirar y mover los brazos; una tela elástica abraza el cuerpo y a veces incluso requiere restar holgura.",
-      },
-      {
-        type: "heading",
-        text: "Los 3 grandes grupos de telas que debes dominar",
-      },
-      {
-        type: "checklist",
-        title: "Cómo identificarlas al tacto en 5 segundos",
-        items: [
-          "1. Tejido plano firme (sin caída): Popelina, lino grueso, drill, gabardina, denim, tafetán. Mantienen la forma por sí solas y marcan muy bien los pliegues y cuellos.",
-          "2. Tejido plano con caída fluida: Rayón, chalis, viscosa, crepé georgette, gasa, seda poliéster. No estiran al halarlas a lo ancho, pero caen pegadas al cuerpo haciendo ondas suaves.",
-          "3. Tejido de punto o elástico: Jersey de algodón, rib, suplex, licra, scuba, punto roma. Se estiran al menos un 20% a lo ancho y recuperan su forma al soltarlas.",
+        type: "resumen_rapido",
+        puntos: [
+          "Telas finas con caída (gasa, chalis, viscosa): Aguja fina 70/10 y puntada corta de 2.0 mm.",
+          "Telas planas medias (popelina, lino, crepé): Aguja Universal 80/12 y puntada de 2.5 mm.",
+          "Telas que estiran (licra, jersey, rib): Aguja Punta de Bola / Stretch 75/11 y puntada zig-zag estrecho.",
         ],
       },
       {
-        type: "table",
-        caption: "Tabla maestra de agujas (70/10 a 100/16) y puntadas",
-        headers: [
-          "Tipo de tela",
-          "Calibre y punta de aguja",
-          "Puntada y largo ideal",
-        ],
-        rows: [
-          [
-            "Gasa, chifón, seda fina, tul",
-            "Universal o Microtex 70/10 (fina)",
-            "Recta corta: 1.8 – 2.0 mm (evita que frunza)",
-          ],
-          [
-            "Popelina, lino, rayón, chalis, crepé",
-            "Universal 80/12",
-            "Recta estándar: 2.5 mm",
-          ],
-          [
-            "Jersey, algodón licrado, rib, pijamas",
-            "Punta de bola (Ballpoint / Jersey) 75/11 u 80/12",
-            "Zigzag angosto (ancho 1.5, largo 2.5 mm) o puntada elástica",
-          ],
-          [
-            "Licra deportiva, suplex, trajes de baño",
-            "Stretch (Super Stretch) 75/11 o 90/14",
-            "Zigzag 3 pasos o zigzag suave + hilo poliéster resistente",
-          ],
-          [
-            "Gabardina, drill, pana, lino pesado",
-            "Universal o Jeans 90/14",
-            "Recta 2.8 – 3.0 mm",
-          ],
-          [
-            "Denim grueso, lona, costuras con varias capas",
-            "Jeans / Denim 100/16",
-            "Recta larga 3.0 – 3.5 mm (puedes usar hilo de pespunte)",
-          ],
+        type: "parrafo",
+        texto: "Cuando la máquina salta puntadas en una blusa de licra o arruga una viscosa, casi nunca está desajustada: simplemente tiene puesta una aguja gruesa o de punta aguda que choca contra el tejido.",
+      },
+      {
+        type: "widget_interactivo",
+        widget: "selector_agujas",
+      },
+      {
+        type: "subtitulo",
+        texto: "Por qué el hilo de la tela manda igual que la aguja",
+      },
+      {
+        type: "parrafo",
+        texto: "Además de elegir la aguja correcta, toda tela tiene un sentido de estabilidad paralelo al orillo. Si giras el molde por ahorrar un pedacito de tela, la costura quedará al sesgo y un lado caerá más largo que el otro.",
+      },
+      {
+        type: "ilustracion_svg",
+        tipo: "hilo-tela",
+        titulo: "Sí vs. No: Cómo alinear la flecha del hilo con el orillo",
+        nota: "Mide con la cinta desde la flecha del patrón hasta el orillo en ambos extremos antes de clavar el segundo alfiler.",
+      },
+      {
+        type: "tabla_comparativa",
+        titulo: "Tabla rápida de calibres universales y especiales",
+        encabezados: ["Calibre", "Grosor de tela", "Telas ideales", "Hilo recomendado"],
+        filas: [
+          ["70/10", "Muy liviana", "Chifón, gasa, batista, tul, georgette", "Poliéster fino 120"],
+          ["80/12", "Media (la más usada)", "Popelina, rayón, chalis, lino camisero, crepé", "Poliéster estándar 100"],
+          ["75/11 o 80/12 Ballpoint", "Punto y elásticas", "Jersey algodón, licra, suplex, rib, pijamas", "Poliéster + hilaza en fileteadora"],
+          ["90/14", "Media–Pesada", "Gabardina, drill, pana, lino sastre, paño liviano", "Poliéster estándar"],
+          ["100/16 Jeans", "Pesada", "Denim grueso, lona, loneta, sobre-costuras", "Hilo calibre 40 o 60"],
         ],
       },
       {
-        type: "tip",
-        title: "Regla de oro antes de empezar un proyecto nuevo",
-        text: "Cambia la aguja cada 8 horas de costura continua o cada 2 prendas grandes. Una aguja con la punta micro-doblada pica los hilos de la tela de punto y crea carreras o huequitos después de la primera lavada.",
-        tone: "amber",
+        type: "alerta_tijera",
+        titulo: "⚠️ ¡Cuidado antes de cortar telas resbaladizas!",
+        texto: "No cortes gasa, satén ni seda fría con la tela colgando fuera de la mesa: el propio peso del rollo hala la tela y deforma las curvas. Apoya todo el tramo sobre la mesa y usa pesas o alfileres finos cada 5 cm.",
       },
     ],
     accionGenerador: {
-      label: "Hacer este molde con mis medidas ahora →",
+      label: "Abrir el Generador con esta prenda →",
       description:
-        "Prueba un Vestido Cruzado en tela fluida o cambia a tela elástica en el Paso 2 para ver cómo el generador recalcula la holgura.",
+        "Elige entre tela normal o tela elástica en el Paso 2 del Generador para que las holguras se ajusten solas.",
       href: "/?prenda=vestido&estilo=boho_ruffle_dress",
     },
   },
@@ -347,12 +368,12 @@ export const BLOG_POSTS: BlogPost[] = [
     titulo:
       "Cómo imprimir moldes PDF en casa (Carta y A4) y armarlos sin que se descuadren ni 1 milímetro",
     subtitulo:
-      "El paso a paso para configurar tu impresora a escala real 100%, comprobar el cuadro de prueba y pegar las hojas como un plano profesional.",
+      "El protocolo de taller en 6 pasos para verificar el cuadro de 5×5 cm y unir tus hojas en minutos sin sorpresas de talla.",
     categoria: "Trucos de Taller",
     tiempoLectura: "5 min",
     fecha: "2026-11-13",
     resumenSEO:
-      "Evita que tus moldes impresos salgan más pequeños o más grandes. Aprende a imprimir PDF a escala 100% (tamaño real) en hojas Carta o A4.",
+      "Checklist interactivo y diagrama para imprimir moldes PDF a escala 100% en hojas Carta o A4 y comprobar el cuadro de 5x5 cm.",
     palabrasClave: [
       "imprimir moldes pdf tamaño real",
       "escala 100 por ciento pdf costura",
@@ -361,60 +382,46 @@ export const BLOG_POSTS: BlogPost[] = [
     ],
     contenidoEstructurado: [
       {
-        type: "paragraph",
-        text: "No hay nada más frustrante que imprimir 12 hojas, pegarlas con cinta y darte cuenta cuando terminas que el cuadro de prueba mide 4.6 cm en vez de 5.0 cm. Eso significa que toda la prenda salió un 8% más pequeña — en una cintura de 72 cm acabas perdiendo casi 6 centímetros.",
-      },
-      {
-        type: "svgDiagram",
-        diagram: "pdf-tiling",
-        title: "Cómo comprobar la escala y empatar las hojas sin errores",
-        caption:
-          "Siempre imprime primero únicamente la hoja que contiene el cuadro de verificación y mídelo con regla física antes de imprimir el resto.",
-      },
-      {
-        type: "heading",
-        text: "Configuración obligatoria al darle a 'Imprimir'",
-      },
-      {
-        type: "checklist",
-        title: "4 clics que salvan cualquier impresión",
-        items: [
-          "1. Abre el PDF descargado en Adobe Acrobat Reader o directamente desde Chrome/Edge/Brave (evita imprimir desde vistas previas de WhatsApp en el celular porque suelen reescalar).",
-          "2. En Tamaño / Escala selecciona 'Tamaño real' o 'Escala personalizada: 100%'. Nunca dejes marcado 'Ajustar a la página' ni 'Reducir páginas grandes'.",
-          "3. Verifica que el formato de papel elegido en MoldeFácil (Carta o A4) sea exactamente el mismo papel que pusiste en la bandeja de tu impresora.",
-          "4. Mide el cuadro de calibración (por ejemplo 5 × 5 cm o 10 × 10 cm): si mide exacto, ya puedes imprimir todas las páginas restantes.",
+        type: "resumen_rapido",
+        puntos: [
+          "Imprime primero solo la Hoja 1 y mide el cuadro de control con regla: debe medir 5.0 × 5.0 cm exactos.",
+          "En las opciones de tu impresora marca siempre 'Tamaño real' o 'Escala: 100%' (jamás 'Ajustar a página').",
+          "Recorta únicamente el margen superior e izquierdo de cada hoja y únelas guiándote por las coordenadas F1-C1.",
         ],
       },
       {
-        type: "table",
-        caption: "Diferencia práctica entre papel Carta y A4 al armar moldes",
-        headers: ["Formato", "Medidas reales", "Dónde se usa más", "Consejo de armado"],
-        rows: [
-          [
-            "Carta (US Letter)",
-            "21.59 × 27.94 cm",
-            "Colombia, México, EE. UU., Centroamérica y parte de Sudamérica",
-            "Recorta solo el borde derecho e inferior de cada hoja antes de sobreponer.",
-          ],
-          [
-            "A4",
-            "21.00 × 29.70 cm",
-            "España, Argentina, Chile, Uruguay y Europa",
-            "Alinea las marcas de esquina (cruces o números de fila/columna) sobre una ventana con luz.",
-          ],
-        ],
+        type: "parrafo",
+        texto: "Si dejas activada la opción por defecto de la impresora ('Ajustar al área de impresión'), el programa encoge todas las hojas un 7% u 8%. Parece poco en una hoja, pero en un vestido representa perder una talla entera.",
       },
       {
-        type: "tip",
-        title: "Usa pegamento en barra en lugar de solo cinta pegante",
-        text: "La cinta transparente brilla y a veces resbala la tijera o se derrite si pasas la plancha cerca. Un toque rápido de pegamento en barra escolar en el borde superpuesto deja las hojas planas como un solo pliego grande y puedes recortar encima con total suavidad.",
-        tone: "teal",
+        type: "ilustracion_svg",
+        tipo: "cuadro-calibracion",
+        titulo: "La prueba reina antes de gastar papel: el cuadro de 5.0 × 5.0 cm",
+        nota: "Si tu regla marca 4.6 o 4.8 cm, cambia el ajuste de escala de tu impresora a 'Tamaño real' o '100%' antes de imprimir el resto.",
+      },
+      {
+        type: "subtitulo",
+        texto: "Sigue este checklist en tu mesa mientras armas el molde",
+      },
+      {
+        type: "widget_interactivo",
+        widget: "checklist_impresion",
+      },
+      {
+        type: "truco_taller",
+        titulo: "💡 Truco de Taller: Pegamento en barra en las esquinas",
+        texto: "En lugar de gastar rollos de cinta adhesiva (que brilla y desafila las tijeras), pasa pegamento escolar en barra sobre la pestaña de unión y pon solo un pedacito de cinta de papel en los cruces de las líneas del molde.",
+      },
+      {
+        type: "alerta_tijera",
+        titulo: "⚠️ ¡Cuidado antes de cortar el papel!",
+        texto: "No mezcles formato Carta y A4. Si en tu casa compras resmas tamaño Carta (común en Colombia y México), asegúrate de que en el Paso 3 de MoldeFácil esté marcado el botón 'Hoja Carta' antes de descargar el PDF.",
       },
     ],
     accionGenerador: {
-      label: "Hacer este molde con mis medidas ahora →",
+      label: "Abrir el Generador con esta prenda →",
       description:
-        "En el Paso 3 de MoldeFácil puedes activar la vista de 'Cuadrícula de hojas' para ver exactamente cuántas hojas Carta o A4 ocupará tu molde antes de descargarlo.",
+        "Activa el botón 'Ver cuadrícula de hojas' sobre el lienzo del Generador para previsualizar el armado exacto en Carta o A4.",
       href: "/?prenda=vestido&estilo=camisero",
     },
   },
@@ -423,12 +430,12 @@ export const BLOG_POSTS: BlogPost[] = [
     titulo:
       "Fórmula exacta para cortar faldas circulares (Plato, Medio Plato y Doble Plato) sin desperdiciar tela",
     subtitulo:
-      "Domina la geometría de una buena vez: calcula el radio perfecto de cintura con pi (π) y evita que la cintura quede enorme por cortar al sesgo.",
+      "Calcula el radio de cintura sin miedo a las matemáticas y aprende cómo doblar la tela para que no se deforme al sesgo.",
     categoria: "Patronaje",
     tiempoLectura: "6 min",
     fecha: "2026-11-14",
     resumenSEO:
-      "Fórmula matemática fácil para calcular el radio de cintura en faldas cuarto de plato, medio plato, plato completo y doble plato sin errores.",
+      "Tabla de radios de cintura y guía de corte al doblez para faldas cuarto de plato, medio plato, plato completo y doble plato.",
     palabrasClave: [
       "formula falda circular",
       "falda plato radio cintura",
@@ -437,67 +444,60 @@ export const BLOG_POSTS: BlogPost[] = [
     ],
     contenidoEstructurado: [
       {
-        type: "paragraph",
-        text: "Cortar una falda circular directamente sobre la tela doblada da vértigo si no entiendes de dónde sale ese número del 'radio de cintura'. Pero en realidad es pura aritmética de escuela aplicada al vestido más bonito y vendible de cualquier taller.",
-      },
-      {
-        type: "svgDiagram",
-        diagram: "circle-skirt-formula",
-        title: "Esquema geométrico: Radio de cintura (R) y Largo (L)",
-        caption:
-          "El compás improvisado con tu cinta métrica gira desde la esquina superior derecha trazando primero R (cintura) y luego R + Largo (ruedo).",
-      },
-      {
-        type: "table",
-        caption: "Fórmulas exactas según el vuelo elegido (C = Contorno de cintura)",
-        headers: [
-          "Tipo de vuelo",
-          "Fórmula del Radio (R)",
-          "Ejemplo para cintura 72 cm",
-          "Caída y uso ideal",
-        ],
-        rows: [
-          [
-            "Cuarto de plato (90°)",
-            "R = (C × 2) ÷ π",
-            "45.8 cm (sin margen)",
-            "Vuelo sutil, elegante para oficina y telas con cuerpo.",
-          ],
-          [
-            "Medio plato (180°)",
-            "R = C ÷ π",
-            "22.9 cm (sin margen)",
-            "Vuelo medio equilibrado; entra en una sola pieza doblada en telas de 150 cm.",
-          ],
-          [
-            "Plato completo (360°)",
-            "R = C ÷ (2 × π)",
-            "11.5 cm (sin margen)",
-            "Giro amplio tipo años 50; requiere más tela si el largo supera 60 cm.",
-          ],
-          [
-            "Doble plato (720°)",
-            "R = C ÷ (4 × π)",
-            "5.7 cm por cada círculo",
-            "Máximo volumen para vestidos de fiesta o baile (2 círculos unidos en costados).",
-          ],
+        type: "resumen_rapido",
+        puntos: [
+          "Medio plato (180°): divide tu cintura entre 3.14 y réstale 1 cm para compensar el estiramiento al sesgo.",
+          "Plato completo (360°): divide tu cintura entre 6.28 (por ejemplo, para 72 cm de cintura el radio es 10.5 cm).",
+          "Cuelga la falda 24 horas en un gancho antes de doblar y coser el ruedo.",
         ],
       },
       {
-        type: "tip",
-        title: "Cuidado con el estiramiento al sesgo en la cintura",
-        text: "El arco de la cintura queda cortado en gran parte al sesgo (diagonal al hilo de la tela) y tiende a ceder 2 o 3 cm mientras manipulas la tela. Por eso conviene restar 1 cm al radio al marcar la curva (ya incluido en nuestra calculadora) y pasar una costura recta de refuerzo justo a 0.5 cm del borde antes de coser la pretina.",
-        tone: "rose",
+        type: "parrafo",
+        texto: "Las faldas circulares favorecen todas las siluetas porque no llevan pinzas en la cintura ni abultan la cadera. Todo el secreto consiste en clavar el inicio de tu cinta métrica en la esquina de la tela doblada y usarla como un compás.",
       },
       {
-        type: "paragraph",
-        text: "Además, recuerda dejar colgada la falda 24 horas en un gancho antes de cortar e igualar el dobladillo: las zonas que caen al sesgo se estiran por gravedad hacia abajo y así evitas picos desiguales.",
+        type: "tabla_comparativa",
+        titulo: "Tabla lista de radios de cintura (ya incluye descuento anti-sesgo)",
+        encabezados: [
+          "Cintura real",
+          "Cuarto plato (90°)",
+          "Medio plato (180°)",
+          "Plato entero (360°)",
+          "Doble plato (720°)",
+        ],
+        filas: [
+          ["64 cm (XS)", "39.5 cm", "19.4 cm", "9.2 cm", "4.5 cm (×2 círculos)"],
+          ["72 cm (S/M)", "44.5 cm", "21.9 cm", "10.5 cm", "5.1 cm (×2 círculos)"],
+          ["80 cm (L)", "49.5 cm", "24.5 cm", "11.7 cm", "5.7 cm (×2 círculos)"],
+          ["90 cm (XL)", "56.0 cm", "27.6 cm", "13.3 cm", "6.5 cm (×2 círculos)"],
+          ["100 cm (XXL)", "62.4 cm", "30.8 cm", "14.9 cm", "7.3 cm (×2 círculos)"],
+        ],
+      },
+      {
+        type: "subtitulo",
+        texto: "Cómo apoyar el molde sobre el doblez sin añadir centímetros de más",
+      },
+      {
+        type: "ilustracion_svg",
+        tipo: "doblez-tela",
+        titulo: "El borde recto va pegado al doblez de la tela",
+        nota: "Al cortar medio plato en una sola pieza sin costuras laterales, apoya un lado sobre el doblez y deja margen de 1.5 cm únicamente en el borde opuesto donde irá el cierre.",
+      },
+      {
+        type: "alerta_tijera",
+        titulo: "⚠️ ¡Cuidado antes de cortar la curva de cintura!",
+        texto: "No estires la curva recién cortada para 'medir si quedó bien'. Como el arco pasa por el bies de la tela, si lo halas con las manos cederá hasta 4 cm antes de ponerle la pretina.",
+      },
+      {
+        type: "truco_taller",
+        titulo: "💡 Truco de Taller: Costura de retención a los 2 minutos de cortar",
+        texto: "Apenas retires el molde, pasa una costura recta normal a 0.5 cm del borde de la cintura de extremo a extremo sin rematar ni fruncir. Ese hilo sujeta las fibras diagonales y garantiza que la cintura conserve tu medida exacta.",
       },
     ],
     accionGenerador: {
-      label: "Hacer este molde con mis medidas ahora →",
+      label: "Abrir el Generador con esta prenda →",
       description:
-        "Genera ahora el molde completo de Falda Circular con pretina incluida o usa nuestra Calculadora Geométrica interactiva en Mi Taller.",
+        "Descarga el patrón listo de Falda Circular a tu medida o calcula cualquier vuelo en nuestra calculadora de Mi Taller.",
       href: "/?prenda=falda&estilo=circular",
       secondaryLink: {
         label: "Abrir Calculadora de Faldas Circulares",
@@ -510,12 +510,12 @@ export const BLOG_POSTS: BlogPost[] = [
     titulo:
       "Cómo ponerle precio justo a tu trabajo de costura y calcular tu ganancia real por hora",
     subtitulo:
-      "Cobrar 'a ojo' o igual que la competencia te hace trabajar gratis. Aprende la fórmula profesional para cubrir materiales, luz, agujas y dejar utilidad real.",
+      "La fórmula clara en 4 bloques para que cada prenda pague tus materiales, tu tiempo real, el desgaste de tu máquina y deje ganancia limpia.",
     categoria: "Negocio y Precios",
     tiempoLectura: "6 min",
     fecha: "2026-11-15",
     resumenSEO:
-      "Guía financiera práctica para modistas y talleres de costura: cómo cobrar mano de obra, costos fijos, insumos y margen de ganancia sin regalar tu tiempo.",
+      "Fórmula paso a paso para cobrar trabajos de costura y confección a medida calculando materiales, mano de obra, costos fijos y margen.",
     palabrasClave: [
       "cuanto cobrar por coser",
       "como poner precio ropa a medida",
@@ -524,63 +524,62 @@ export const BLOG_POSTS: BlogPost[] = [
     ],
     contenidoEstructurado: [
       {
-        type: "paragraph",
-        text: "Muchas modistas talentosas terminan agotadas a fin de mes sin entender por qué no les queda dinero si tuvieron trabajo todos los días. El culpable casi siempre es el mismo: cobran solo el 'tiempo sentadas frente a la máquina' o duplican el precio de la tela, olvidando las horas de tomar medidas, trazar el molde, cortar, hilvanar, hacer pruebas y planchar.",
-      },
-      {
-        type: "heading",
-        text: "Los 4 pilares de una cotización profesional",
-      },
-      {
-        type: "table",
-        caption: "Qué debe incluir cada presupuesto (ejemplo real de un vestido cruzado)",
-        headers: ["Concepto", "Qué abarca", "Cómo calcularlo"],
-        rows: [
-          [
-            "1. Materiales e insumos",
-            "Tela, hilo al tono, entretela, cierre, botones, elástico",
-            "Suma real de factura + 5% de imprevistos en avíos.",
-          ],
-          [
-            "2. Mano de obra real",
-            "Patronaje + corte + costura + pruebas + planchado final",
-            "Total de horas reales × el valor hora que merece tu experiencia.",
-          ],
-          [
-            "3. Costos fijos del taller (15%)",
-            "Electricidad, agujas, aceite, repuestos, alquiler/internet",
-            "Suma un 10% a 18% sobre la base de materiales + mano de obra.",
-          ],
-          [
-            "4. Margen de ganancia (25%)",
-            "Dinero limpio para crecer, comprar maquinaria o ahorrar",
-            "Tu sueldo paga tu trabajo; el margen paga al taller como negocio.",
-          ],
+        type: "resumen_rapido",
+        puntos: [
+          "Nunca cobres 'el doble de la tela': si la clienta trae una tela barata pero difícil de coser, pierdes dinero.",
+          "Suma siempre 4 bloques: Materiales + (Horas totales × tu valor hora) + 15% desgaste fijo + 25% utilidad del taller.",
+          "Pide siempre el 50% de anticipo al tomar medidas para cubrir insumos y asegurar el compromiso.",
         ],
       },
       {
-        type: "checklist",
-        title: "Reglas sanas para cobrar sin discusiones con el cliente",
-        items: [
-          "Siempre pide un abono del 50% antes de comprar tela o cortar (cubre materiales y asegura el compromiso).",
-          "Incluye máximo 1 o 2 pruebas de entalle en el presupuesto; cambios completos de diseño después de cortado se cobran aparte.",
-          "Nunca compitas por ser la más barata de la zona: compite por puntualidad en la entrega, acabados limpios y calce exacto.",
+        type: "parrafo",
+        texto: "El error que más quema a las modistas independientes es contar únicamente las horas sentadas en la máquina. Atender a la clienta, trazar el molde, tender la tela, cortar con precisión, hilvanar, hacer la prueba y planchar también es trabajo profesional.",
+      },
+      {
+        type: "subtitulo",
+        texto: "Desglose real de tiempos que sí debes cobrar",
+      },
+      {
+        type: "tabla_comparativa",
+        titulo: "Tiempo promedio real por prenda a medida (incluyendo corte y prueba)",
+        encabezados: [
+          "Prenda",
+          "Molde y corte",
+          "Costura, prueba y plancha",
+          "Total horas a cobrar",
+        ],
+        filas: [
+          ["Falda recta o circular básica", "0.8 h", "2.0 h", "2.8 a 3.0 horas"],
+          ["Blusa con vistas o cuello", "1.0 h", "2.5 h", "3.5 horas"],
+          ["Pantalón a medida con bolsillos", "1.2 h", "3.5 h", "4.7 a 5.0 horas"],
+          ["Vestido cruzado o camisero", "1.5 h", "4.0 h", "5.5 horas"],
+          ["Conjunto sastre (Blusa + Palazzo)", "2.0 h", "5.5 h", "7.5 horas"],
         ],
       },
       {
-        type: "tip",
-        title: "Envía cotizaciones claras y profesionales por WhatsApp",
-        text: "Al cliente no le envíes tu desglose interno de porcentajes o valor por hora; envíale un mensaje limpio con el nombre de la prenda, qué incluye (patronaje a medida, insumos, pruebas, confección), tiempo de entrega y precio total.",
-        tone: "teal",
+        type: "truco_taller",
+        titulo: "💡 Truco de Taller: Separa tu sueldo de la ganancia del taller",
+        texto: "Tu pago por hora es tu sueldo como costurera. El 25% de margen adicional es la ganancia de tu taller como negocio: es el fondo que te permite comprar una fileteadora nueva, tijeras profesionales o tomarte vacaciones.",
+      },
+      {
+        type: "ilustracion_svg",
+        tipo: "hilo-tela",
+        titulo: "Cortar bien a la primera ahorra horas de descoser",
+        nota: "Dedicar 3 minutos a medir el hilo de la tela evita tener que desarmar costados torcidos durante la prueba con la clienta.",
+      },
+      {
+        type: "alerta_tijera",
+        titulo: "⚠️ ¡Cuidado antes de cortar sin anticipo!",
+        texto: "Jamás cortes una tela (ni siquiera si la trajo la clienta) sin haber dejado por escrito en WhatsApp el modelo acordado, la fecha de prueba y el abono del 50% recibido.",
       },
     ],
     accionGenerador: {
-      label: "Hacer este molde con mis medidas ahora →",
+      label: "Abrir el Generador con esta prenda →",
       description:
-        "Ahorra hasta 1 hora de trazado en cada encargo sacando la base del patrón en segundos con MoldeFácil y cotiza el trabajo en Mi Taller.",
+        "Reduce tu tiempo de patronaje de 1 hora a 2 minutos con el Generador y arma el presupuesto listo para WhatsApp en Mi Taller.",
       href: "/?prenda=conjunto&estilo=sastre",
       secondaryLink: {
-        label: "Usar Cotizador '¿Cuánto cobrar por coser?'",
+        label: "Abrir Cotizador de Costura en Mi Taller",
         href: "/taller?tab=cotizador",
       },
     },
@@ -590,12 +589,12 @@ export const BLOG_POSTS: BlogPost[] = [
     titulo:
       "Guía de acabados limpios: Cómo coser vistas de escote, sesgos y dobladillos invisibles",
     subtitulo:
-      "La diferencia entre una prenda 'casera' y una de boutique está por dentro. Aprende a dar la vuelta a curvas perfectas sin arrugas ni bultos.",
+      "Los 3 secretos de taller (piquetes en V, pespunte de carga y plancha por pasos) para que tus cuellos y sisas luzcan de tienda fina.",
     categoria: "Trucos de Taller",
     tiempoLectura: "6 min",
     fecha: "2026-11-16",
     resumenSEO:
-      "Técnicas profesionales paso a paso para coser vistas con entretela, sesgo oculto, piquetes en curvas, pespunte de carga y dobladillo pañuelo o invisible.",
+      "Aprende con diagramas Sí vs No cómo hacer piquetes en curvas, pespunte de carga en vistas y dobladillos finos sin ondas.",
     palabrasClave: [
       "como coser vista de escote",
       "poner sesgo en escote y sisas",
@@ -604,40 +603,69 @@ export const BLOG_POSTS: BlogPost[] = [
     ],
     contenidoEstructurado: [
       {
-        type: "paragraph",
-        text: "Puedes haber acertado todas las medidas del cuerpo, pero si el escote se levanta hacia afuera o el dobladillo de la falda hace pliegues torcidos, la prenda pierde todo su encanto. La buena noticia es que los acabados limpios no requieren máquinas industriales costosas: solo 3 trucos de plancha y tijera.",
-      },
-      {
-        type: "svgDiagram",
-        diagram: "clean-finishes",
-        title: "Anatomía de un escote impecable y un bajo bien pulido",
-        caption:
-          "Los piquetes en la curva y el pespunte de carga ('understitching') obligan a la tela interior a esconderse para siempre.",
-      },
-      {
-        type: "heading",
-        text: "Los 3 trucos que transforman tus acabados hoy",
-      },
-      {
-        type: "checklist",
-        title: "Paso a paso de boutique",
-        items: [
-          "1. Piquetes en curvas (escotes y sisas): Antes de girar una vista o sesgo, haz pequeños cortes triangulares o rectos cada 1.5 cm en el margen de costura, llegando a 2 mm del hilo sin cortarlo.",
-          "2. Pespunte de carga (Understitch): Voltea el margen de costura hacia la vista (no hacia el derecho de la prenda) y pasa una costura recta a 2 mm del borde agarrando solo vista + márgenes. ¡La vista jamás volverá a asomarse por fuera!",
-          "3. Dobladillo fino en telas fluidas (dobladillo pañuelo): Pasa primero una costura recta a 0.6 cm del borde, dobla siguiendo esa línea, plancha, vuelve a doblar 0.5 cm y cose pegado al doblez. Queda firme sin retorcerse.",
+        type: "resumen_rapido",
+        puntos: [
+          "Toda costura curva (escote o sisa) necesita piquetes cada 1.5 cm antes de voltear la tela.",
+          "Pasa siempre un pespunte de carga ('understitch') a 2 mm sobre la vista sujetando los márgenes internos.",
+          "En telas fluidas haz dobladillo pañuelo en 2 pasadas con plancha intermedia para que no se retuerza.",
         ],
       },
       {
-        type: "tip",
-        title: "El secreto de la plancha: cose y plancha al momento",
-        text: "La regla número uno de la sastrería es no cruzar nunca una costura sin haberla planchado antes. Abrir o asentar cada costura con vapor antes de unir la siguiente pieza elimina el 90% de las arrugas finales.",
-        tone: "amber",
+        type: "parrafo",
+        texto: "Cuando una vista de escote se asoma hacia afuera o forma pequeños picos alrededor del cuello, no es culpa de tu pulso al coser: es porque el margen interno tiene un recorrido distinto al de la prenda y necesita liberar tensión.",
+      },
+      {
+        type: "ilustracion_svg",
+        tipo: "piquetes-curvas",
+        titulo: "Sí vs. No: Por qué los piquetes transforman cualquier escote",
+        nota: "Usa la punta de tu tijera bien afilada para cortar pequeños triángulos llegando a 2 mm de la costura, sin tocar jamás el hilo.",
+      },
+      {
+        type: "subtitulo",
+        texto: "Qué acabado elegir según la tela de tu proyecto",
+      },
+      {
+        type: "tabla_comparativa",
+        titulo: "Comparativa de acabados para escotes, sisas y bajos",
+        encabezados: ["Zona de la prenda", "Acabado ideal", "Cuándo usarlo"],
+        filas: [
+          [
+            "Escote redondo, V o cuadrado",
+            "Vista interna con entretela + pespunte de carga",
+            "Vestidos y blusas en lino, popelina, crepé o viscosa.",
+          ],
+          [
+            "Sisas sin manga y escotes finos",
+            "Sesgo oculto de la misma tela (cortado a 45°)",
+            "Gasa, chalis, blusas livianas y ropa infantil.",
+          ],
+          [
+            "Ruedo en falda circular o fluida",
+            "Dobladillo pañuelo (0.5 cm + 0.5 cm)",
+            "Evita las arrugas que deja un dobladillo ancho en curva.",
+          ],
+          [
+            "Bota de pantalón sastre o falda recta",
+            "Dobladillo de 3 a 4 cm con puntada invisible",
+            "Gabardina, paño, lino pesado y crepé sastre.",
+          ],
+        ],
+      },
+      {
+        type: "truco_taller",
+        titulo: "💡 Truco de Taller: El pespunte de carga que nadie ve",
+        texto: "Después de hacer los piquetes, abre la vista, empuja ambos márgenes de costura hacia el lado de la vista y pasa una costura recta por el derecho de la vista a 2 mm de la unión. Al doblar hacia adentro, la costura queda oculta 1 milímetro por detrás del borde.",
+      },
+      {
+        type: "alerta_tijera",
+        titulo: "⚠️ ¡Cuidado antes de cortar tiras de sesgo!",
+        texto: "Una tira cortada al hilo recto NO sirve para bordear un escote curvo porque no cede y dejará el cuello levantado. Dóblala siempre a 45° exactos (diagonal perfecta entre orillo y trama).",
       },
     ],
     accionGenerador: {
-      label: "Hacer este molde con mis medidas ahora →",
+      label: "Abrir el Generador con esta prenda →",
       description:
-        "Cada molde de MoldeFácil incluye su guía dinámica de armado con recomendaciones exactas de telas, insumos y orden de costura.",
+        "Genera el molde de Blusa Campesina o de Oficina con su guía de armado e insumos detallados paso a paso.",
       href: "/?prenda=blusa&estilo=campesina",
     },
   },
@@ -646,12 +674,12 @@ export const BLOG_POSTS: BlogPost[] = [
     titulo:
       "Cómo adaptar un molde básico para lograr mangas kimono, cortes imperio o caída blusada",
     subtitulo:
-      "No necesitas empezar desde cero para cada diseño nuevo: a partir de un corpiño base bien calibrado puedes crear docenas de variaciones modernas.",
+      "Multiplica tu catálogo de diseños modificando tres líneas simples sobre tu patrón base de confianza.",
     categoria: "Patronaje",
     tiempoLectura: "7 min",
     fecha: "2026-11-17",
     resumenSEO:
-      "Aprende transformaciones básicas de patronaje plano: cómo sacar manga kimono sin sisa, subir el talle a corte imperio y dar caída blusada.",
+      "Guía práctica de transformación de patrones: cómo pasar de un molde básico a manga kimono, corte imperio bajo busto o efecto blusado.",
     palabrasClave: [
       "transformacion molde manga kimono",
       "corte imperio patronaje",
@@ -660,49 +688,74 @@ export const BLOG_POSTS: BlogPost[] = [
     ],
     contenidoEstructurado: [
       {
-        type: "paragraph",
-        text: "Cuando dominas un patrón base que te calza perfecto en hombros, pecho y cintura, ya tienes el 70% de cualquier prenda que veas en Pinterest. Los grandes talleres no redibujan todo cada temporada: aplican transformaciones geométricas sencillas sobre la misma base.",
+        type: "resumen_rapido",
+        puntos: [
+          "Manga kimono: prolonga la línea de hombro de 18 a 25 cm, baja 2 cm en la punta y suaviza la curva de axila.",
+          "Corte imperio: corta el molde horizontalmente de 8 a 10 cm bajo el punto del busto y añade margen a ambas piezas.",
+          "Caída blusada: suma +4 cm al largo del talle y deja +5 cm de holgura en cintura para recoger con elástico o lazo.",
+        ],
       },
       {
-        type: "svgDiagram",
-        diagram: "pattern-adaptations",
-        title: "3 transformaciones rápidas sobre tu patrón base",
-        caption:
-          "Izquierda: prolongar hombro para manga kimono. Centro: corte bajo el busto para estilo imperio. Derecha: ensanchar costado para caída blusada.",
+        type: "parrafo",
+        texto: "El secreto de los talleres rentables es no empezar desde cero en cada pedido. Cuando tienes una base cuyas medidas de busto, espalda y cintura ya comprobaste, cualquier diseño de tendencia es solo un ajuste geométrico.",
       },
       {
-        type: "table",
-        caption: "Resumen rápido de cada transformación",
-        headers: ["Estilo deseado", "Qué se modifica del molde básico", "Recomendación de tela"],
-        rows: [
+        type: "ilustracion_svg",
+        tipo: "doblez-tela",
+        titulo: "Mantén siempre el centro del corpiño alineado al doblez",
+        nota: "Aunque modifiques hombro, sisa o cintura, la línea central del delantero (salvo que sea cruzado o con botones) se conserva recta sobre el doblez.",
+      },
+      {
+        type: "subtitulo",
+        texto: "Tabla de medidas exactas para transformar tu base",
+      },
+      {
+        type: "tabla_comparativa",
+        titulo: "Cuánto mover cada línea según el efecto que buscas",
+        encabezados: ["Transformación", "Ajuste en hombro / sisa", "Ajuste en cintura / talle", "Tela ideal"],
+        filas: [
           [
-            "Manga Kimono / Murciélago",
-            "Extiendes la línea de hombro hacia afuera (18–25 cm) con ligera inclinación de 15° y dibujas una curva suave bajo la axila.",
-            "Rayón, viscosa, lino suave o tejido de punto con caída.",
+            "Manga Kimono corta",
+            "Extiende hombro +18 cm, baja 2 cm y haz curva amplia en costado",
+            "Holgura +3 cm por costado para levantar el brazo cómoda",
+            "Viscosa, rayón, lino liviano",
           ],
           [
-            "Corte Imperio (estilo Bridgerton)",
-            "Mides unos 8–10 cm bajo el pezón, trazas un corte horizontal bajo el busto y unes la falda fruncida o semicircular desde ahí.",
-            "Popelina, gasa forrada, lino liviano o satén fluido.",
+            "Corte Imperio romántico",
+            "Conserva sisa normal o combina con manga globo",
+            "Corta a 8–10 cm bajo el pezón; falda evasé o fruncida",
+            "Popelina, gasa forrada, satén",
           ],
           [
-            "Caída Blusada (Blouson)",
-            "Eliminas o relajas la pinza de cintura, sumas 3–4 cm de largo al talle y recoges la cintura con elástico o jareta.",
-            "Chalis, seda fría, crepé o viscosa estampada.",
+            "Talle Blusado con cinturón",
+            "Sisa 1.5 cm más baja para mayor soltura",
+            "Alarga el talle +4 cm para que forme bolsa elegante sobre la cintura",
+            "Chalis, crepé, seda fría",
+          ],
+          [
+            "Frente Cruzado (Wrap)",
+            "Cruza el escote en V hasta el costado opuesto de la cintura",
+            "Corta 2 delanteros completos (ya no va al doblez)",
+            "Tejido de punto o viscosa fluida",
           ],
         ],
       },
       {
-        type: "tip",
-        title: "No tengas miedo de experimentar sin papel de sobra",
-        text: "En MoldeFácil puedes probar estas combinaciones en segundos sin gastar papel: cambia el tipo de manga a 'Kimono', prueba 'Holgado / Fluido' o elige directamente los diseños curados en 'Explorar Modas y Estilos'.",
-        tone: "rose",
+        type: "truco_taller",
+        titulo: "💡 Truco de Taller: Curva suave bajo la axila en mangas kimono",
+        texto: "En las mangas kimono nunca dejes un ángulo recto entre el bajo de la manga y el costado de la blusa, porque tirará al levantar el brazo. Dibuja una curva redondeada de al menos 6 cm de radio y hazle 3 piquetes después de coser.",
+      },
+      {
+        type: "ilustracion_svg",
+        tipo: "piquetes-curvas",
+        titulo: "Haz piquetes en la curva bajo el brazo de tu manga kimono",
+        nota: "Al igual que en el escote, esos 3 pequeños cortes bajo la axila evitan que la manga haga arrugas cuando bajas el brazo.",
       },
     ],
     accionGenerador: {
-      label: "Hacer este molde con mis medidas ahora →",
+      label: "Abrir el Generador con esta prenda →",
       description:
-        "Abre el diseño Corte Imperio o Vestido Cruzado con manga kimono precargado en el Generador y ajústalo a tus medidas.",
+        "En MoldeFácil estas transformaciones ya están programadas: cámbialas en 1 clic sin redibujar en papel.",
       href: "/?prenda=vestido&estilo=imperio",
     },
   },

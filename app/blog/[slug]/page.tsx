@@ -7,6 +7,7 @@ import SiteHeader from "@/components/SiteHeader";
 import AdBanner from "@/components/AdBanner";
 import BlogArticleRenderer from "@/components/blog/BlogArticleRenderer";
 import BlogShareButtons from "@/components/blog/BlogShareButtons";
+import ReadingProgressBar from "@/components/blog/ReadingProgressBar";
 
 export function generateStaticParams() {
   return BLOG_POSTS.map((post) => ({
@@ -95,7 +96,9 @@ export default async function BlogPostPage({
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-slate-800 overflow-x-hidden">
+    <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-[#2D2A26] overflow-x-hidden">
+      <ReadingProgressBar />
+
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -108,13 +111,13 @@ export default async function BlogPostPage({
             className="min-h-[44px] px-4 py-2 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold shadow-xs inline-flex items-center gap-2 transition"
           >
             <Scissors className="h-4 w-4" />
-            <span>Hacer este molde</span>
+            <span>Abrir con esta prenda</span>
           </Link>
         }
       />
 
-      <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
-        {/* Top Ad Banner */}
+      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
+        {/* Top Ad Banner before article title */}
         <div className="flex justify-center md:hidden w-full">
           <AdBanner
             variant="mobile-banner"
@@ -134,33 +137,33 @@ export default async function BlogPostPage({
         <div>
           <Link
             href="/blog"
-            className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-rose-700 transition min-h-[40px]"
+            className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-[#C85A32] transition min-h-[40px]"
           >
             <ArrowLeft className="h-4 w-4" />
-            <span>Volver a todas las guías</span>
+            <span>Volver al cuaderno de guías</span>
           </Link>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Article Column */}
-          <article className="lg:col-span-8 min-w-0 space-y-6">
-            <header className="rounded-3xl bg-white border border-slate-200 p-6 sm:p-8 shadow-xs space-y-4">
+          <article className="lg:col-span-8 min-w-0 space-y-6 max-w-3xl">
+            <header className="rounded-3xl bg-white border border-[#E5DCD0] p-6 sm:p-8 shadow-xs space-y-4">
               <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm">
-                <span className="px-3.5 py-1 rounded-full bg-rose-50 text-rose-800 border border-rose-200 font-extrabold">
+                <span className="px-3.5 py-1 rounded-full bg-[#FAF6F0] text-[#C85A32] border border-[#E5DCD0] font-extrabold">
                   {post.categoria}
                 </span>
                 <span className="inline-flex items-center gap-1 font-semibold text-slate-500">
-                  <Clock className="h-4 w-4" />
+                  <Clock className="h-4 w-4 text-[#C85A32]" />
                   {post.tiempoLectura} de lectura
                 </span>
                 <span className="text-slate-400">• {post.fecha}</span>
               </div>
 
-              <h1 className="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight">
+              <h1 className="text-2xl sm:text-4xl font-extrabold text-[#2D2A26] tracking-tight leading-tight">
                 {post.titulo}
               </h1>
 
-              <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
+              <p className="text-[17px] sm:text-[18px] text-[#5C554E] leading-relaxed">
                 {post.subtitulo}
               </p>
 
@@ -177,12 +180,13 @@ export default async function BlogPostPage({
               blocks={post.contenidoEstructurado}
               action={post.accionGenerador}
               slug={post.slug}
+              readingTime={post.tiempoLectura}
             />
 
             {/* Bottom Share Box */}
-            <div className="rounded-3xl bg-white border border-slate-200 p-5 sm:p-6 shadow-xs space-y-3">
-              <h2 className="text-base font-extrabold text-slate-900">
-                ¿Te sirvió esta guía? Guárdala o compártela con otra persona que cosa
+            <div className="rounded-3xl bg-white border border-[#E5DCD0] p-5 sm:p-6 shadow-xs space-y-3 max-w-3xl">
+              <h2 className="text-base font-extrabold text-[#2D2A26]">
+                ¿Te sirvió esta guía en tu mesa de corte? Compártela o guárdala
               </h2>
               <BlogShareButtons
                 title={post.titulo}
@@ -201,38 +205,38 @@ export default async function BlogPostPage({
               />
             </div>
 
-            <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-xs space-y-3">
-              <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <Wrench className="h-4 w-4 text-teal-600" />
+            <div className="rounded-3xl bg-white border border-[#E5DCD0] p-5 shadow-xs space-y-3">
+              <h2 className="text-base font-extrabold text-[#2D2A26] flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-[#3B7A57]" />
                 <span>Herramientas de Mi Taller</span>
               </h2>
-              <p className="text-sm text-slate-600 leading-relaxed">
+              <p className="text-sm text-[#5C554E] leading-relaxed">
                 Calcula cuánto cobrar, faldas circulares exactas, plan de corte sobre tela y lleva tus encargos al día.
               </p>
               <Link
                 href="/taller"
-                className="w-full min-h-[46px] px-4 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white text-sm font-extrabold flex items-center justify-center gap-2 transition"
+                className="w-full min-h-[46px] px-4 py-2.5 rounded-2xl bg-[#3B7A57] hover:bg-[#2F6346] text-white text-sm font-extrabold flex items-center justify-center gap-2 transition"
               >
                 <span>Abrir Mi Taller</span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
 
-            <div className="rounded-3xl bg-white border border-slate-200 p-5 shadow-xs space-y-3">
-              <h2 className="text-base font-extrabold text-slate-900">
-                Otras guías recomendadas
+            <div className="rounded-3xl bg-white border border-[#E5DCD0] p-5 shadow-xs space-y-3">
+              <h2 className="text-base font-extrabold text-[#2D2A26]">
+                Otras guías del cuaderno
               </h2>
               <div className="space-y-3">
                 {relatedPosts.map((rel) => (
                   <Link
                     key={rel.slug}
                     href={`/blog/${rel.slug}`}
-                    className="block p-3 rounded-2xl bg-[#FAF8F5] hover:bg-rose-50 border border-slate-200 hover:border-rose-200 transition"
+                    className="block p-3 rounded-2xl bg-[#FAF6F0] hover:bg-[#FDF3EE] border border-[#E5DCD0] hover:border-[#C85A32] transition"
                   >
-                    <span className="block text-[11px] font-extrabold uppercase tracking-wide text-rose-700 mb-1">
+                    <span className="block text-[11px] font-extrabold uppercase tracking-wide text-[#C85A32] mb-1">
                       {rel.categoria}
                     </span>
-                    <span className="block text-sm font-bold text-slate-900 leading-snug">
+                    <span className="block text-sm font-bold text-[#2D2A26] leading-snug">
                       {rel.titulo}
                     </span>
                   </Link>

@@ -76,7 +76,7 @@ export default function BlogIndexClient({ posts }: BlogIndexClientProps) {
       {/* Results Count */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <p className="text-sm font-semibold text-slate-600">
-          Mostrando {filteredPosts.length} de {posts.length} guías prácticas
+          Mostrando {filteredPosts.length} de {posts.length} guías de cuaderno de taller
         </p>
         <Link
           href="/taller"
@@ -111,14 +111,17 @@ export default function BlogIndexClient({ posts }: BlogIndexClientProps) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {filteredPosts.map((post) => {
-            const hasInteractive = post.contenidoEstructurado.some(
-              (b) =>
-                b.type === "interactiveFabricTable" || b.type === "svgDiagram"
+            const hasWidget = post.contenidoEstructurado.some(
+              (b) => b.type === "widget_interactivo"
             );
+            const hasIllustration = post.contenidoEstructurado.some(
+              (b) => b.type === "ilustracion_svg"
+            );
+
             return (
               <article
                 key={post.slug}
-                className="rounded-3xl bg-white border border-slate-200 hover:border-rose-300 p-5 sm:p-6 shadow-xs flex flex-col justify-between gap-4 transition"
+                className="rounded-3xl bg-white border border-slate-200 hover:border-[#C85A32] p-5 sm:p-6 shadow-xs flex flex-col justify-between gap-4 transition"
               >
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -136,7 +139,7 @@ export default function BlogIndexClient({ posts }: BlogIndexClientProps) {
                   </div>
 
                   <Link href={`/blog/${post.slug}`} className="block group">
-                    <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 group-hover:text-rose-700 transition leading-snug">
+                    <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 group-hover:text-[#C85A32] transition leading-snug">
                       {post.titulo}
                     </h2>
                   </Link>
@@ -147,10 +150,15 @@ export default function BlogIndexClient({ posts }: BlogIndexClientProps) {
                 </div>
 
                 <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-                  {hasInteractive ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-xl border border-teal-200">
+                  {hasWidget ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-extrabold text-[#C85A32] bg-[#FAF6F0] px-2.5 py-1 rounded-xl border border-[#E5DCD0]">
                       <Sparkles className="h-3.5 w-3.5" />
-                      Incluye esquema / tabla práctica
+                      Con mini-calculadora interactiva
+                    </span>
+                  ) : hasIllustration ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-extrabold text-[#3B7A57] bg-[#F2F7F4] px-2.5 py-1 rounded-xl border border-[#C4DDD0]">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Ilustración técnica Sí vs. No
                     </span>
                   ) : (
                     <span className="text-xs text-slate-400">{post.fecha}</span>
@@ -160,7 +168,7 @@ export default function BlogIndexClient({ posts }: BlogIndexClientProps) {
                     href={`/blog/${post.slug}`}
                     className="min-h-[44px] px-4 py-2 rounded-2xl bg-[#FAF8F5] hover:bg-rose-600 text-slate-900 hover:text-white border border-slate-200 hover:border-rose-600 text-sm font-extrabold inline-flex items-center gap-1.5 transition"
                   >
-                    <span>Leer guía</span>
+                    <span>Abrir guía</span>
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </div>
