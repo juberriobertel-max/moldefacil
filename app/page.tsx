@@ -1,7 +1,10 @@
 "use client";
 
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
+  Box,
+  Columns2,
   Download,
   Camera,
   Shirt,
@@ -65,6 +68,39 @@ import DownloadAdModal from "@/components/DownloadAdModal";
 import SiteHeader from "@/components/SiteHeader";
 import HomeQueryParamsSync from "@/components/HomeQueryParamsSync";
 import { saveLastGeneratedPattern } from "@/lib/savedMeasurements";
+import {
+  APARIENCIA_POR_DEFECTO,
+  PALETA_UI_3D,
+  toConfigPrenda,
+  toMedidas3D,
+  type Apariencia,
+} from "@/lib/3d/types";
+
+const Garment3DPreview = dynamic(
+  () => import("@/components/Garment3DPreview"),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="w-full min-h-[540px] h-[640px] rounded-3xl border border-[#E2D6C8] flex flex-col items-center justify-center p-6 text-center"
+        style={{ backgroundColor: PALETA_UI_3D.crema }}
+      >
+        <div
+          className="w-12 h-12 rounded-2xl flex items-center justify-center mb-3 text-white animate-pulse"
+          style={{ backgroundColor: PALETA_UI_3D.terracota }}
+        >
+          <Box className="w-6 h-6" />
+        </div>
+        <p className="text-sm font-extrabold text-[#2D2A26]">
+          Cargando Probador 3D…
+        </p>
+        <p className="text-xs text-[#5C554E] mt-1 max-w-xs">
+          Preparando maniquí anatómico y motor textil interactivo en tu dispositivo.
+        </p>
+      </div>
+    ),
+  }
+);
 
 const DEFAULT_MEASUREMENTS: Measurements = {
   bust: 92,
@@ -239,6 +275,22 @@ export default function HomePage() {
   const [activePieceId, setActivePieceId] = useState<string>("all");
   const [showSheetGrid, setShowSheetGrid] = useState<boolean>(false);
 
+  const [vistaPatron, setVistaPatron] = useState<"2d" | "3d" | "dividida">("2d");
+  const [apariencia3D, setApariencia3D] = useState<Apariencia>(() => ({
+    ...APARIENCIA_POR_DEFECTO,
+  }));
+  const [usuarioFijoTela3D, setUsuarioFijoTela3D] = useState<boolean>(false);
+  const [esPantallaAncha, setEsPantallaAncha] = useState<boolean>(false);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sincronizar = () => setEsPantallaAncha(mq.matches);
+    queueMicrotask(sincronizar);
+    mq.addEventListener("change", sincronizar);
+    return () => mq.removeEventListener("change", sincronizar);
+  }, []);
+
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState<boolean>(false);
 
   const applyFashionPreset = useCallback((preset: FashionStylePreset) => {
@@ -346,6 +398,75 @@ export default function HomePage() {
   );
 
   const sewingGuide = useMemo(() => generateSewingGuide(pattern), [pattern]);
+
+  const medidas3D = useMemo(
+    () => toMedidas3D(measurements, category),
+    [measurements, category]
+  );
+
+  const configPrenda3D = useMemo(
+    () =>
+      toConfigPrenda({
+        category,
+        topSubStyle,
+        pantsSubStyle,
+        skirtSubStyle,
+        dressSubStyle,
+        twoPieceTopStyle,
+        twoPieceBottomStyle,
+        jumpsuitSubStyle,
+        kidsSubStyle,
+        loungewearSubStyle,
+        accessorySubStyle,
+        necklineStyle,
+        sleeveStyle,
+        torsoFit,
+        extras,
+        quickLength,
+        styleVariant,
+        measurements,
+        fabricType,
+      }),
+    [
+      category,
+      topSubStyle,
+      pantsSubStyle,
+      skirtSubStyle,
+      dressSubStyle,
+      twoPieceTopStyle,
+      twoPieceBottomStyle,
+      jumpsuitSubStyle,
+      kidsSubStyle,
+      loungewearSubStyle,
+      accessorySubStyle,
+      necklineStyle,
+      sleeveStyle,
+      torsoFit,
+      extras,
+      quickLength,
+      styleVariant,
+      measurements,
+      fabricType,
+    ]
+  );
+
+  const aparienciaEfectiva3D = useMemo<Apariencia>(() => {
+    if (usuarioFijoTela3D) return apariencia3D;
+    return {
+      ...apariencia3D,
+      tela: fabricType === "stretch" ? "licra" : apariencia3D.tela,
+    };
+  }, [apariencia3D, fabricType, usuarioFijoTela3D]);
+
+  const handleApariencia3DChange = useCallback(
+    (siguiente: Apariencia) => {
+      if (siguiente.tela !== aparienciaEfectiva3D.tela) {
+        setUsuarioFijoTela3D(true);
+      }
+      setApariencia3D(siguiente);
+    },
+    [aparienciaEfectiva3D.tela]
+  );
 
   useEffect(() => {
     saveLastGeneratedPattern(pattern);
@@ -1392,18 +1513,134 @@ export default function HomePage() {
           </div>
         </aside>
 
-        {/* RIGHT COLUMN: White Cutting Mat Canvas + Sewing Guide + Bottom Responsive Banner */}
+        {/* RIGHT COLUMN: Selector de vista (2D / 3D / Dividida) + Canvas + Sewing Guide */}
         <section className="min-w-0 lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
-          <div className="flex-1 min-h-[540px]">
-            <PatternCanvas
-              pattern={pattern}
-              seamAllowance={seamAllowance}
-              paperFormat={paperFormat}
-              activePieceId={activePieceId}
-              onActivePieceIdChange={setActivePieceId}
-              showSheetGrid={showSheetGrid}
-              onToggleSheetGrid={() => setShowSheetGrid((s) => !s)}
-            />
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#E2D6C8] bg-[#FAF6F0] px-2.5 py-2 shadow-xs">
+            <div
+              role="tablist"
+              aria-label="Modo de visualización del patrón y simulador 3D"
+              className="inline-flex flex-wrap items-center gap-1.5"
+            >
+              {(
+                [
+                  {
+                    id: "2d" as const,
+                    label: "📐 Molde 2D (Imprimir)",
+                  },
+                  {
+                    id: "3d" as const,
+                    label: "👗 Probador 3D",
+                  },
+                  {
+                    id: "dividida" as const,
+                    label: "👯 Vista Dividida",
+                  },
+                ] as const
+              ).map((tab, idx, arr) => {
+                const seleccionado = vistaPatron === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    ref={(el) => {
+                      tabRefs.current[idx] = el;
+                    }}
+                    role="tab"
+                    id={`tab-vista-${tab.id}`}
+                    aria-selected={seleccionado}
+                    aria-controls={`panel-vista-${tab.id}`}
+                    tabIndex={seleccionado ? 0 : -1}
+                    type="button"
+                    onClick={() => setVistaPatron(tab.id)}
+                    onKeyDown={(e) => {
+                      let nextIdx = -1;
+                      if (e.key === "ArrowRight") nextIdx = (idx + 1) % arr.length;
+                      else if (e.key === "ArrowLeft")
+                        nextIdx = (idx - 1 + arr.length) % arr.length;
+                      else if (e.key === "Home") nextIdx = 0;
+                      else if (e.key === "End") nextIdx = arr.length - 1;
+                      if (nextIdx >= 0) {
+                        e.preventDefault();
+                        setVistaPatron(arr[nextIdx].id);
+                        tabRefs.current[nextIdx]?.focus();
+                      }
+                    }}
+                    className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition-colors flex items-center gap-1.5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] focus-visible:ring-offset-1 ${
+                      seleccionado
+                        ? "text-white shadow-sm border border-[#9E3E1C]"
+                        : "text-[#2D2A26] bg-white/80 hover:bg-[#EFE6DA] border border-[#E2D6C8]"
+                    }`}
+                    style={
+                      seleccionado
+                        ? { backgroundColor: "#B34720" }
+                        : undefined
+                    }
+                  >
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {vistaPatron === "dividida" && !esPantallaAncha && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#5C554E] px-2">
+                <Columns2 className="w-3.5 h-3.5 text-[#C85A32]" />
+                Vista única automática en móvil
+              </span>
+            )}
+          </div>
+
+          <div
+            role="tabpanel"
+            id={`panel-vista-${vistaPatron}`}
+            aria-labelledby={`tab-vista-${vistaPatron}`}
+            className="flex-1 min-h-[540px]"
+          >
+            {vistaPatron === "2d" && (
+              <PatternCanvas
+                pattern={pattern}
+                seamAllowance={seamAllowance}
+                paperFormat={paperFormat}
+                activePieceId={activePieceId}
+                onActivePieceIdChange={setActivePieceId}
+                showSheetGrid={showSheetGrid}
+                onToggleSheetGrid={() => setShowSheetGrid((s) => !s)}
+              />
+            )}
+
+            {(vistaPatron === "3d" ||
+              (vistaPatron === "dividida" && !esPantallaAncha)) && (
+              <Garment3DPreview
+                medidas={medidas3D}
+                config={configPrenda3D}
+                apariencia={aparienciaEfectiva3D}
+                onAparienciaChange={handleApariencia3DChange}
+              />
+            )}
+
+            {vistaPatron === "dividida" && esPantallaAncha && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
+                <div className="min-h-[560px]">
+                  <PatternCanvas
+                    pattern={pattern}
+                    seamAllowance={seamAllowance}
+                    paperFormat={paperFormat}
+                    activePieceId={activePieceId}
+                    onActivePieceIdChange={setActivePieceId}
+                    showSheetGrid={showSheetGrid}
+                    onToggleSheetGrid={() => setShowSheetGrid((s) => !s)}
+                  />
+                </div>
+                <div className="min-h-[560px]">
+                  <Garment3DPreview
+                    medidas={medidas3D}
+                    config={configPrenda3D}
+                    apariencia={aparienciaEfectiva3D}
+                    onAparienciaChange={handleApariencia3DChange}
+                    modoCompacto
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Dynamic Step-by-Step Sewing Guide & Fabric Recommendations */}
