@@ -758,7 +758,7 @@ export default function Garment3DPreview({
                     : "text-[#3D352E] hover:bg-[#EFE6DA]"
                 }`}
                 style={
-                  activa ? { backgroundColor: PALETA_UI_3D.terracota } : undefined
+                  activa ? { backgroundColor: "#B34720" } : undefined
                 }
               >
                 <Eye className="w-3.5 h-3.5 shrink-0" />
@@ -1047,7 +1047,7 @@ export default function Garment3DPreview({
                 ? "text-white shadow-sm"
                 : "text-[#3D352E] hover:bg-[#EFE6DA]"
             }`}
-            style={autoGirar ? { backgroundColor: PALETA_UI_3D.terracota } : undefined}
+            style={autoGirar ? { backgroundColor: "#B34720" } : undefined}
           >
             <RotateCw
               className={`w-4 h-4 shrink-0 ${autoGirar ? "animate-spin" : ""}`}
