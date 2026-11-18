@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Scissors,
   Download,
   Camera,
   Shirt,
@@ -63,6 +62,9 @@ import {
 import PatternCanvas from "@/components/PatternCanvas";
 import AdBanner from "@/components/AdBanner";
 import DownloadAdModal from "@/components/DownloadAdModal";
+import SiteHeader from "@/components/SiteHeader";
+import HomeQueryParamsSync from "@/components/HomeQueryParamsSync";
+import { saveLastGeneratedPattern } from "@/lib/savedMeasurements";
 
 const DEFAULT_MEASUREMENTS: Measurements = {
   bust: 92,
@@ -239,7 +241,7 @@ export default function HomePage() {
 
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState<boolean>(false);
 
-  const applyFashionPreset = (preset: FashionStylePreset) => {
+  const applyFashionPreset = useCallback((preset: FashionStylePreset) => {
     const c = preset.config;
     setCategory(c.category);
     if (c.topSubStyle) setTopSubStyle(c.topSubStyle);
@@ -260,7 +262,15 @@ export default function HomePage() {
     setStyleVariant(c.styleVariant);
     setActiveFashionStyleId(preset.id);
     setActivePieceId("all");
-  };
+  }, []);
+
+  const handleUpdateMeasurementsPatch = useCallback(
+    (patch: Partial<Measurements>) => {
+      setMeasurements((prev) => ({ ...prev, ...patch }));
+      setOpenStep(2);
+    },
+    []
+  );
 
   const applyDetectedAttributes = (cfg: DetectedGarmentConfig) => {
     setCategory(cfg.category);
@@ -336,6 +346,10 @@ export default function HomePage() {
   );
 
   const sewingGuide = useMemo(() => generateSewingGuide(pattern), [pattern]);
+
+  useEffect(() => {
+    saveLastGeneratedPattern(pattern);
+  }, [pattern]);
 
   const tilingGrid = useMemo(
     () =>
@@ -450,33 +464,34 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-slate-800 overflow-x-hidden">
-      {/* Warm, Inviting Header */}
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur px-4 lg:px-8 py-3.5 shadow-2xs">
-        <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-rose-600 flex items-center justify-center shadow-sm text-white shrink-0">
-              <Scissors className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900">
-                MoldeFácil — Tus patrones de costura a medida
-              </h1>
-              <p className="text-sm text-slate-500 hidden sm:block">
-                Crea moldes a tu talla en 3 pasos y descárgalos gratis listos para imprimir en casa
-              </p>
-            </div>
-          </div>
+      <Suspense fallback={null}>
+        <HomeQueryParamsSync
+          onApplyPreset={applyFashionPreset}
+          onSelectCategory={(cat) => {
+            setCategory(cat);
+            setStyleVariant("default");
+            setActiveFashionStyleId(null);
+            setActivePieceId("all");
+            setPins(getDefaultPinsForCategory(cat));
+            setPinsMoved(false);
+          }}
+          onUpdateMeasurements={handleUpdateMeasurementsPatch}
+          onSelectMode={setMode}
+        />
+      </Suspense>
 
+      <SiteHeader
+        rightSlot={
           <button
             type="button"
             onClick={() => setIsDownloadModalOpen(true)}
-            className="min-h-[48px] px-5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-base font-bold shadow-md flex items-center gap-2 transition cursor-pointer"
+            className="min-h-[44px] px-4 py-2 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-sm sm:text-base font-bold shadow-md flex items-center gap-2 transition cursor-pointer whitespace-nowrap"
           >
-            <Download className="h-5 w-5" />
-            Descargar Molde en PDF (Gratis)
+            <Download className="h-4 w-4 sm:h-5 sm:w-5" />
+            <span>Descargar PDF (Gratis)</span>
           </button>
-        </div>
-      </header>
+        }
+      />
 
       {/* Main 2-Column Sewing Studio */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
