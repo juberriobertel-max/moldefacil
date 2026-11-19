@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
+import { PatternPiece, SolvedTracingProportions } from "../types";
 import { evaluarPerfilEnY } from "./bodyProfile";
 import {
   AnilloPerfil,
@@ -13,6 +14,19 @@ import {
 
 export const TILE_ESTAMPADO_M = 0.08;
 export const OFFSET_COSTURA_M = 0.0024;
+
+export type ZonaPieza3D =
+  | "delantero"
+  | "espalda"
+  | "manga"
+  | "falda_inferior"
+  | "pantalon_inferior"
+  | "cuello_vista"
+  | "cinturon"
+  | "bolsillo"
+  | "bolero"
+  | "sombrero"
+  | "cartuchera";
 
 export interface Etiqueta3DProyectada {
   id: string;
@@ -30,6 +44,7 @@ export interface DatosCaidaAnimada {
 export interface OpcionesMallaPrenda {
   nivelDetalle: NivelDetalle3D;
   materialPrincipal: THREE.MeshPhysicalMaterial;
+  materialSecundario?: THREE.MeshPhysicalMaterial;
   materialForroOVista?: THREE.MeshPhysicalMaterial;
   mostrarCosturas: boolean;
   /** Factor extra de ceñido para telas elásticas como licra (mantiene r >= r_cuerpo). */
@@ -39,6 +54,7 @@ export interface OpcionesMallaPrenda {
 export interface ResultadoMallaPrenda {
   grupo: THREE.Group;
   grupoCosturas: THREE.Group;
+  grupoCintasMetricas: THREE.Group;
   etiquetas: Etiqueta3DAncla[];
   triangulosTotales: number;
 }
@@ -87,7 +103,8 @@ export function calcularAlturaBordeSuperiorM(
   escote: TipoEscote,
   theta: number,
   perfil: PerfilCuerpo,
-  escoteCerrado = false
+  escoteCerrado = false,
+  proporcionesFoto?: SolvedTracingProportions
 ): number {
   const absT = Math.abs(theta);
   const tFrente = clamp(1 - absT / (Math.PI * 0.5), 0, 1);
@@ -144,19 +161,36 @@ export function calcularAlturaBordeSuperiorM(
       break;
   }
 
+  if (proporcionesFoto?.necklineDropRatio) {
+    const dropFotoM = clamp(
+      cmAMetros(42 * proporcionesFoto.necklineDropRatio),
+      cmAMetros(3.5),
+      cmAMetros(22.0)
+    );
+    const factorMod = clamp(dropFotoM / cmAMetros(10.5), 0.48, 1.92);
+    dropDelanteroM *= factorMod;
+  }
+
   return Math.max(
-    perfil.bustoYM - cmAMetros(3.5),
+    perfil.bustoYM - cmAMetros(6.8),
     lineaBase - dropDelanteroM
   );
 }
 
 /**
- * Registra metadatos de caída animada y cuenta triángulos reales de una malla.
+ * Registra metadatos de caída animada, sombra y zona semántica de una malla.
  */
 function registrarMalla(
   mesh: THREE.Mesh,
-  pesos?: Float32Array
+  pesos?: Float32Array,
+  zonaPieza?: ZonaPieza3D
 ): number {
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.userData.materialOriginal = mesh.material;
+  if (zonaPieza) {
+    mesh.userData.zonaPieza = zonaPieza;
+  }
   const posAttr = mesh.geometry.getAttribute("position");
   if (pesos && posAttr instanceof THREE.BufferAttribute) {
     const datos: DatosCaidaAnimada = {
@@ -300,9 +334,10 @@ function calcularAlturaTopEscoteYSisa(
       config.escote,
       theta,
       perfil,
-      config.escoteCerrado
+      config.escoteCerrado,
+      config.proporcionesFoto
     ),
-    perfil.bustoYM - cmAMetros(4),
+    perfil.bustoYM - cmAMetros(7.0),
     yMaxAbs
   );
 
@@ -310,7 +345,15 @@ function calcularAlturaTopEscoteYSisa(
     const distSisa = Math.abs(Math.abs(theta) - SISA_ESTANDAR.thetaCentro);
     if (distSisa < SISA_ESTANDAR.anchoRad) {
       const factor = smoothstep(SISA_ESTANDAR.anchoRad, 0, distSisa);
-      yTopFinal = Math.min(yTopFinal, perfil.hombroYM - cmAMetros(11) * factor);
+      const multSisa = clamp(
+        config.proporcionesFoto?.armholeDepthMultiplier ?? 1,
+        0.78,
+        1.32
+      );
+      yTopFinal = Math.min(
+        yTopFinal,
+        perfil.hombroYM - cmAMetros(11) * multSisa * factor
+      );
     }
   }
   return yTopFinal;
@@ -334,7 +377,8 @@ function construirTiraConRelieveSobreTorso(
   holguraBaseM: number,
   material: THREE.MeshPhysicalMaterial,
   nombre: string,
-  sesgoAncho = 0.5
+  sesgoAncho = 0.5,
+  zonaPieza: ZonaPieza3D = "cuello_vista"
 ): THREE.Mesh {
   const n = muestras.length;
   const pasos = cerrado ? n + 1 : n;
@@ -423,7 +467,85 @@ function construirTiraConRelieveSobreTorso(
 
   const mesh = new THREE.Mesh(geo, material);
   mesh.name = nombre;
-  registrarMalla(mesh);
+  registrarMalla(mesh, undefined, zonaPieza);
+  return mesh;
+}
+
+/**
+ * Construye un dobladillo tubular compacto de 3D (`anchoM × espesorM`) a lo largo de un anillo de borde
+ * para dar grosor real a ruedos de falda, blusa, bocamangas y botas sin aspecto plano.
+ */
+function construirDobladilloDesdeAnillo(
+  puntosAnillo: readonly THREE.Vector3[],
+  material: THREE.MeshPhysicalMaterial,
+  nombre: string,
+  zonaPieza: ZonaPieza3D,
+  espesorM = 0.0022,
+  altoM = 0.0075
+): THREE.Mesh {
+  const n = puntosAnillo.length;
+  const pos: number[] = [];
+  const uvs: number[] = [];
+  const idx: number[] = [];
+
+  if (n < 3) {
+    const empty = new THREE.Mesh(new THREE.BufferGeometry(), material);
+    empty.name = nombre;
+    registrarMalla(empty, undefined, zonaPieza);
+    return empty;
+  }
+
+  // Calcular centroide del anillo para extraer normales radiales hacia afuera del tubo
+  const centro = new THREE.Vector3();
+  for (let i = 0; i < n; i++) centro.add(puntosAnillo[i]);
+  centro.divideScalar(n);
+
+  let arcLen = 0;
+  for (let i = 0; i <= n; i++) {
+    const p = puntosAnillo[i % n];
+    if (i > 0) {
+      arcLen += p.distanceTo(puntosAnillo[(i - 1) % n]);
+    }
+    const radial = new THREE.Vector3(p.x - centro.x, 0, p.z - centro.z);
+    if (radial.lengthSq() < 1e-8) radial.set(0, 0, 1);
+    else radial.normalize();
+
+    const up = new THREE.Vector3(0, 1, 0);
+    // 4 esquinas cerrando un canto suavemente redondeado alrededor del borde inferior
+    const ptsPerimetro = [
+      p.clone().addScaledVector(up, altoM).addScaledVector(radial, espesorM * 0.9),
+      p.clone().addScaledVector(up, 0).addScaledVector(radial, espesorM),
+      p.clone().addScaledVector(up, -espesorM * 0.55).addScaledVector(radial, 0.0),
+      p.clone().addScaledVector(up, altoM * 0.7).addScaledVector(radial, -espesorM * 0.25),
+    ];
+
+    for (let c = 0; c <= 4; c++) {
+      const cp = ptsPerimetro[c % 4];
+      pos.push(cp.x, cp.y, cp.z);
+      uvs.push(arcLen, (c / 4) * altoM * 2);
+    }
+  }
+
+  const cols = 5;
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < 4; c++) {
+      const a = i * cols + c;
+      const b = (i + 1) * cols + c;
+      const cNext = i * cols + (c + 1);
+      const d = (i + 1) * cols + (c + 1);
+      idx.push(a, cNext, b, cNext, d, b);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(idx);
+  finalizarGeometria(geo);
+
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.name = nombre;
+  registrarMalla(mesh, undefined, zonaPieza);
   return mesh;
 }
 
@@ -436,10 +558,11 @@ function muestrearPuntoTorsoPrenda(
   theta: number,
   perfil: PerfilCuerpo,
   config: ConfigPrenda,
-  ajusteStretchM: number
+  ajusteStretchM: number,
+  extraOffsetRadialM = 0
 ): { x: number; y: number; z: number; extKimono: number; pesoCaida: number } {
   const deltaR = calcularDeltaRadioM(config, anillo.y, perfil, ajusteStretchM);
-  let rExtra = deltaR;
+  let rExtra = deltaR + extraOffsetRadialM;
 
   // Silueta holgada / blusada: pliegues verticales y abultamiento bajo busto/sobre cinturón
   if (config.silueta === "holgado") {
@@ -531,32 +654,44 @@ function muestrearPuntoTorsoPrenda(
 }
 
 /**
- * Construye la malla superior del corpiño (blusa, chaqueta, top de vestido o enterizo)
- * con recorte anatómico `h(θ)` en el escote.
+ * Construye la malla superior del corpiño (blusa, chaqueta, top de vestido, body o enterizo)
+ * con recorte anatómico `h(θ)` en el escote, abertura opcional de chaqueta y dobladillo 3D inferior.
  */
 function construirCorpino(
   perfil: PerfilCuerpo,
   config: ConfigPrenda,
   yInferiorM: number,
-  opciones: OpcionesMallaPrenda
-): { mesh: THREE.Mesh; etiquetaFrente?: Etiqueta3DAncla } {
+  opciones: OpcionesMallaPrenda,
+  extraOffsetRadialM = 0
+): { mesh: THREE.Mesh; extras?: THREE.Object3D[]; etiquetaFrente?: Etiqueta3DAncla } {
   const segsRad = opciones.nivelDetalle === "movil" ? 40 : 64;
   const rows = opciones.nivelDetalle === "movil" ? 20 : 30;
   const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
 
-  const yMinAbs = clamp(
-    yInferiorM,
-    perfil.caderaYM - cmAMetros(4),
-    perfil.bustoYM - cmAMetros(2)
-  );
+  const esBodyInfantil = config.subEstiloEspecial === "baby_bodysuit";
+  const yMinAbs = esBodyInfantil
+    ? clamp(
+        perfil.cinturaYM - perfil.alturaTiroM * 0.92,
+        perfil.musloYM + 0.008,
+        perfil.caderaYM
+      )
+    : clamp(
+        yInferiorM,
+        perfil.caderaYM - cmAMetros(8),
+        perfil.bustoYM - cmAMetros(2)
+      );
 
   // Para envolvente (wrap), cortamos abertura delantera entre -0.24 y +0.24 rad en V profunda
   const esWrap = config.escote === "wrap";
+  const esChaquetaAbierta =
+    (config.prenda === "chaqueta" || config.dosPiezasArriba === "jacket_blazer") &&
+    config.escote === "solapaSastre";
 
   const positions: number[] = [];
   const uvs: number[] = [];
   const weights: number[] = [];
   const indices: number[] = [];
+  const puntosRuedoInferior: THREE.Vector3[] = [];
 
   for (let r = 0; r < rows; r++) {
     const tRow = r / (rows - 1); // 0 arriba, 1 abajo
@@ -564,18 +699,25 @@ function construirCorpino(
       const fracS = s / segsRad;
       const theta = (fracS - 0.5) * Math.PI * 2; // -π (atrás) -> 0 (frente) -> +π (atrás)
       const yTopFinal = calcularAlturaTopEscoteYSisa(config, theta, perfil);
+      const yBotTheta = esBodyInfantil
+        ? yMinAbs + cmAMetros(6.8) * Math.pow(Math.sin(theta), 2)
+        : yMinAbs;
 
-      const y = yTopFinal + (yMinAbs - yTopFinal) * tRow;
+      const y = yTopFinal + (yBotTheta - yTopFinal) * tRow;
       const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, y);
       const pt = muestrearPuntoTorsoPrenda(
         anillo,
         theta,
         perfil,
         config,
-        ajusteStretch
+        ajusteStretch,
+        extraOffsetRadialM
       );
 
       positions.push(pt.x, pt.y, pt.z);
+      if (r === rows - 1 && s < segsRad) {
+        puntosRuedoInferior.push(new THREE.Vector3(pt.x, pt.y, pt.z));
+      }
       const circEstimado = Math.PI * (anillo.a + anillo.b);
       uvs.push((theta / (Math.PI * 2)) * circEstimado, y);
       weights.push(pt.pesoCaida);
@@ -597,6 +739,9 @@ function construirCorpino(
         r < Math.floor(rows * 0.34) &&
         Math.abs(thetaMid) < (1 - r / Math.max(1, rows * 0.36)) * 0.16
       ) {
+        continue;
+      }
+      if (esChaquetaAbierta && Math.abs(thetaMid) < 0.068) {
         continue;
       }
       if (
@@ -629,6 +774,92 @@ function construirCorpino(
   const mesh = new THREE.Mesh(geo, opciones.materialPrincipal);
   mesh.name = "garment-corpino";
 
+  const extras: THREE.Object3D[] = [];
+
+  // Vistas delanteras verticales en chaqueta abierta
+  if (esChaquetaAbierta) {
+    const matVista = opciones.materialForroOVista ?? opciones.materialPrincipal;
+    for (const lado of [-1, 1] as const) {
+      const muestrasFrente: MuestraTiraTorso[] = [];
+      const thetaEdge = lado * 0.085;
+      const yTopEdge = perfil.bustoYM - cmAMetros(2.0);
+      for (let i = 0; i <= 10; i++) {
+        const y = THREE.MathUtils.lerp(yTopEdge, yMinAbs, i / 10);
+        const an = evaluarPerfilEnY(perfil.anillosInterpolados, y);
+        const pt = muestrearPuntoTorsoPrenda(
+          an,
+          thetaEdge,
+          perfil,
+          config,
+          ajusteStretch,
+          extraOffsetRadialM + 0.0025
+        );
+        muestrasFrente.push({
+          pos: new THREE.Vector3(pt.x, pt.y, pt.z),
+          normalOut: calcularNormalTorso(an, thetaEdge),
+        });
+      }
+      extras.push(
+        construirTiraConRelieveSobreTorso(
+          muestrasFrente,
+          cmAMetros(2.4),
+          0.003,
+          false,
+          perfil,
+          0.004,
+          matVista,
+          `chaqueta-frente-vista-${lado > 0 ? "izq" : "der"}`,
+          0.5,
+          "cuello_vista"
+        )
+      );
+    }
+  }
+
+  // Dobladillo inferior con grosor 3D para prendas superiores separadas
+  const llevaDobladilloInferior =
+    config.prenda === "blusa" ||
+    config.prenda === "chaqueta" ||
+    (config.esDosPiezas && config.dosPiezasArriba === "crop_top") ||
+    config.dosPiezasArriba === "waist_blouse" ||
+    config.dosPiezasArriba === "jacket_blazer";
+  if (llevaDobladilloInferior && !esChaquetaAbierta && puntosRuedoInferior.length >= 6) {
+    extras.push(
+      construirDobladilloDesdeAnillo(
+        puntosRuedoInferior,
+        opciones.materialPrincipal,
+        "corpino-dobladillo-inferior",
+        "delantero",
+        0.0022,
+        0.0075
+      )
+    );
+  }
+
+  // Broches inferiores en el tiro para body infantil
+  if (esBodyInfantil) {
+    const snapGeo = new THREE.CylinderGeometry(0.005, 0.005, 0.003, 12);
+    const snapMat = new THREE.MeshStandardMaterial({
+      color: 0xd0d4da,
+      roughness: 0.28,
+      metalness: 0.72,
+    });
+    const instSnaps = new THREE.InstancedMesh(snapGeo, snapMat, 3);
+    instSnaps.name = "body-infantil-broches";
+    instSnaps.userData.esHerraje = true;
+    instSnaps.userData.zonaPieza = "delantero";
+    const dummy = new THREE.Object3D();
+    const anSnap = evaluarPerfilEnY(perfil.anillosInterpolados, yMinAbs + 0.008);
+    [-0.018, 0, 0.018].forEach((ox, i) => {
+      dummy.position.set(ox, yMinAbs + 0.004, anSnap.desplazamientoZ + 0.01);
+      dummy.rotation.x = Math.PI * 0.42;
+      dummy.updateMatrix();
+      instSnaps.setMatrixAt(i, dummy.matrix);
+    });
+    instSnaps.instanceMatrix.needsUpdate = true;
+    extras.push(instSnaps);
+  }
+
   const bustoAnillo = perfil.anillosClave.busto;
   const etiquetaFrente: Etiqueta3DAncla = {
     id: "lbl-delantero",
@@ -641,8 +872,8 @@ function construirCorpino(
     normalLocal: [0, 0, 1],
   };
 
-  registrarMalla(mesh, new Float32Array(weights));
-  return { mesh, etiquetaFrente };
+  registrarMalla(mesh, new Float32Array(weights), "delantero");
+  return { mesh, extras: extras.length > 0 ? extras : undefined, etiquetaFrente };
 }
 
 /**
@@ -722,7 +953,7 @@ function construirEscoteWrapConVistas(
 
     const mesh = new THREE.Mesh(geo, matPrincipal);
     mesh.name = pan.nombre;
-    registrarMalla(mesh);
+    registrarMalla(mesh, undefined, "delantero");
     meshes.push(mesh);
   }
 
@@ -758,7 +989,8 @@ function construirEscoteWrapConVistas(
     0.009,
     matVista,
     "wrap-vista-4cm",
-    0.5
+    0.5,
+    "cuello_vista"
   );
   meshes.push(vistaMesh);
 
@@ -955,6 +1187,9 @@ function construirCuellosYBotones(
     });
     const instBotones = new THREE.InstancedMesh(btnGeo, btnMat, numBotones);
     instBotones.name = "botones-instanced";
+    instBotones.castShadow = true;
+    instBotones.userData.esHerraje = true;
+    instBotones.userData.zonaPieza = "cuello_vista";
     const dummy = new THREE.Object3D();
 
     const yInicioBtn =
@@ -1057,6 +1292,7 @@ function construirMangas(
     const uvs: number[] = [];
     const idx: number[] = [];
     const pesos = new Float32Array((rings + 1) * (segs + 1));
+    const puntosBocamanga: THREE.Vector3[] = [];
 
     const evaluarRadioBrazoReal = (u: number): number => {
       if (u <= 0.52) {
@@ -1149,6 +1385,9 @@ function construirMangas(
         );
 
         pos.push(envAnt.x, envAnt.y, envAnt.z);
+        if (r === rings && s < segs) {
+          puntosBocamanga.push(new THREE.Vector3(envAnt.x, envAnt.y, envAnt.z));
+        }
         uvs.push((theta / (Math.PI * 2)) * circ, -vPos);
         pesos[r * (segs + 1) + s] =
           config.manga === "acampanada" ? Math.pow(tr, 1.6) * 0.65 : tr * 0.25;
@@ -1174,8 +1413,21 @@ function construirMangas(
 
     const mesh = new THREE.Mesh(geo, opciones.materialPrincipal);
     mesh.name = `manga-${lado > 0 ? "izq" : "der"}`;
-    registrarMalla(mesh, pesos);
+    registrarMalla(mesh, pesos, "manga");
     meshes.push(mesh);
+
+    if (puntosBocamanga.length >= 6) {
+      meshes.push(
+        construirDobladilloDesdeAnillo(
+          puntosBocamanga,
+          opciones.materialPrincipal,
+          `dobladillo-manga-${lado > 0 ? "izq" : "der"}`,
+          "manga",
+          0.0018,
+          0.006
+        )
+      );
+    }
   }
 
   return meshes;
@@ -1243,6 +1495,16 @@ function evaluarAnilloFaldaEnTr(
     const apertura = Math.pow(tr, 1.05) * largoTotalFaldaM * 0.56;
     extraA = drBase + apertura * 1.08;
     extraB = drBase + apertura * 1.02;
+  }
+
+  if (config.proporcionesFoto?.flareRatio) {
+    const modFlare =
+      clamp(config.proporcionesFoto.flareRatio - 1, -0.35, 0.85) *
+      largoTotalFaldaM *
+      0.22 *
+      Math.pow(tr, 1.1);
+    extraA = Math.max(drBase, extraA + modFlare);
+    extraB = Math.max(drBase, extraB + modFlare * 0.92);
   }
 
   // Verificar envolvente real de muslos/rodillas/tobillos opacos por debajo de cadera
@@ -1315,10 +1577,20 @@ function construirFaldaYBolero(
   );
   const caderaAnillo = perfil.anillosClave.cadera;
   const drBase = calcularDeltaRadioM(config, yCinturaInicioM, perfil, ajusteStretch);
+  const matFalda =
+    config.esDosPiezas && opciones.materialSecundario
+      ? opciones.materialSecundario
+      : opciones.materialPrincipal;
 
   // Pretina de 3.2 cm si la falda es pieza separada
   if (config.prenda === "falda" || config.esDosPiezas) {
-    const pretinaGeo = construirPretina(perfil, config, yCinturaInicioM, opciones);
+    const pretinaGeo = construirPretina(
+      perfil,
+      config,
+      yCinturaInicioM,
+      opciones,
+      "falda_inferior"
+    );
     meshes.push(pretinaGeo);
   }
 
@@ -1326,6 +1598,7 @@ function construirFaldaYBolero(
   const uvs: number[] = [];
   const idx: number[] = [];
   const pesos = new Float32Array(rows * (segs + 1));
+  const puntosRuedoFalda: THREE.Vector3[] = [];
 
   for (let r = 0; r < rows; r++) {
     const tr = r / (rows - 1);
@@ -1344,8 +1617,13 @@ function construirFaldaYBolero(
       const onda = evaluarOndaFaldaEnTheta(config, tr, theta);
       const rA = Math.max(anillo.a + 0.003, aBase + onda);
       const rB = Math.max(anillo.b + 0.003, bBase + onda);
+      const px = rA * Math.sin(theta);
+      const pz = zCentro + rB * Math.cos(theta);
 
-      pos.push(rA * Math.sin(theta), y, zCentro + rB * Math.cos(theta));
+      pos.push(px, y, pz);
+      if (r === rows - 1 && s < segs) {
+        puntosRuedoFalda.push(new THREE.Vector3(px, y, pz));
+      }
       uvs.push((theta / (Math.PI * 2)) * (circRef * (1 + tr * (config.vuelo === "circular" ? 1.1 : 0.3))), y);
       pesos[r * (segs + 1) + s] = Math.pow(tr, 1.45);
     }
@@ -1368,10 +1646,23 @@ function construirFaldaYBolero(
   faldaGeo.setIndex(idx);
   finalizarGeometria(faldaGeo);
 
-  const faldaMesh = new THREE.Mesh(faldaGeo, opciones.materialPrincipal);
+  const faldaMesh = new THREE.Mesh(faldaGeo, matFalda);
   faldaMesh.name = "falda-principal";
-  registrarMalla(faldaMesh, pesos);
+  registrarMalla(faldaMesh, pesos, "falda_inferior");
   meshes.push(faldaMesh);
+
+  if (!config.bolero && puntosRuedoFalda.length >= 6) {
+    meshes.push(
+      construirDobladilloDesdeAnillo(
+        puntosRuedoFalda,
+        matFalda,
+        "dobladillo-falda",
+        "falda_inferior",
+        0.0022,
+        0.0075
+      )
+    );
+  }
 
   // Segundo ruedo ondulado (bolero / volante en el ruedo)
   if (config.bolero) {
@@ -1415,9 +1706,9 @@ function construirFaldaYBolero(
     boleroGeo.setIndex(bIdx);
     finalizarGeometria(boleroGeo);
 
-    const boleroMesh = new THREE.Mesh(boleroGeo, opciones.materialPrincipal);
+    const boleroMesh = new THREE.Mesh(boleroGeo, matFalda);
     boleroMesh.name = "falda-bolero";
-    registrarMalla(boleroMesh, bPesos);
+    registrarMalla(boleroMesh, bPesos, "bolero");
     meshes.push(boleroMesh);
   }
 
@@ -1428,7 +1719,8 @@ function construirPretina(
   perfil: PerfilCuerpo,
   config: ConfigPrenda,
   yCinturaM: number,
-  opciones: OpcionesMallaPrenda
+  opciones: OpcionesMallaPrenda,
+  zonaPieza: ZonaPieza3D = "falda_inferior"
 ): THREE.Mesh {
   const segs = 40;
   const rows = 4;
@@ -1471,9 +1763,13 @@ function construirPretina(
   geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(idx);
   finalizarGeometria(geo);
-  const mesh = new THREE.Mesh(geo, opciones.materialForroOVista ?? opciones.materialPrincipal);
+  const matPretina =
+    config.esDosPiezas && opciones.materialSecundario
+      ? opciones.materialSecundario
+      : (opciones.materialForroOVista ?? opciones.materialPrincipal);
+  const mesh = new THREE.Mesh(geo, matPretina);
   mesh.name = "pretina-cintura";
-  registrarMalla(mesh);
+  registrarMalla(mesh, undefined, zonaPieza);
   return mesh;
 }
 
@@ -1492,9 +1788,12 @@ function calcularInfoPiernasPantalon(
   config: ConfigPrenda
 ): InfoPiernasPantalon {
   const piernaRef = perfil.trayectorias.piernaDer;
+  const tiroFotoM =
+    perfil.alturaTiroM *
+    clamp(config.proporcionesFoto?.crotchDepthMultiplier ?? 1, 0.82, 1.28);
   const tiroYM = clamp(
-    perfil.cinturaYM - perfil.alturaTiroM,
-    perfil.musloYM + 0.018,
+    perfil.cinturaYM - tiroFotoM,
+    perfil.musloYM + 0.012,
     perfil.caderaYM - cmAMetros(2)
   );
 
@@ -1531,10 +1830,10 @@ function calcularInfoPiernasPantalon(
       : config.pantalon === "palazzo"
         ? Math.max(rRodillaPrenda * 1.1, perfil.anchoBotaM / Math.PI, rTobilloBase + 0.068)
         : clamp(
-            perfil.anchoBotaM / Math.PI,
-            Math.max(rTobilloBase + 0.014, rMusloBase * 0.68),
-            Math.max(rTobilloBase + 0.036, rMusloBase * 1.18)
-          );
+          perfil.anchoBotaM / Math.PI,
+          Math.max(rTobilloBase + 0.014, rMusloBase * 0.68),
+          Math.max(rTobilloBase + 0.036, rMusloBase * 1.18)
+        );
 
   return {
     tiroYM,
@@ -1618,9 +1917,15 @@ function construirPantalon(
   const segsYugo = opciones.nivelDetalle === "movil" ? 36 : 52;
   const rowsYugo = 10;
   const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
+  const matPant =
+    config.esDosPiezas && opciones.materialSecundario
+      ? opciones.materialSecundario
+      : opciones.materialPrincipal;
 
   if (config.prenda === "pantalon" || config.esDosPiezas) {
-    meshes.push(construirPretina(perfil, config, perfil.cinturaYM, opciones));
+    meshes.push(
+      construirPretina(perfil, config, perfil.cinturaYM, opciones, "pantalon_inferior")
+    );
   }
 
   const infoPiernas = calcularInfoPiernasPantalon(perfil, config);
@@ -1677,9 +1982,9 @@ function construirPantalon(
   yugoGeo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   yugoGeo.setIndex(idx);
   finalizarGeometria(yugoGeo);
-  const yugoMesh = new THREE.Mesh(yugoGeo, opciones.materialPrincipal);
+  const yugoMesh = new THREE.Mesh(yugoGeo, matPant);
   yugoMesh.name = "pantalon-yugo";
-  registrarMalla(yugoMesh);
+  registrarMalla(yugoMesh, undefined, "pantalon_inferior");
   meshes.push(yugoMesh);
 
   // 2. Bifurcación en pierna izquierda y derecha (tiro -> bota)
@@ -1694,6 +1999,7 @@ function construirPantalon(
     const lUvs: number[] = [];
     const lIdx: number[] = [];
     const lPesos = new Float32Array(ringsLeg * (segsLeg + 1));
+    const puntosBota: THREE.Vector3[] = [];
 
     for (let r = 0; r < ringsLeg; r++) {
       const tr = r / (ringsLeg - 1);
@@ -1739,6 +2045,9 @@ function construirPantalon(
           holguraMinSeg
         );
         lPos.push(trasPant.x, trasPant.y, trasPant.z);
+        if (r === ringsLeg - 1 && s < segsLeg) {
+          puntosBota.push(new THREE.Vector3(trasPant.x, trasPant.y, trasPant.z));
+        }
         lUvs.push((theta / (Math.PI * 2)) * circ, y);
         lPesos[r * (segsLeg + 1) + s] =
           config.pantalon === "palazzo" ? Math.pow(tr, 1.5) * 0.85 : config.pantalon === "recto" ? tr * 0.25 : 0;
@@ -1762,10 +2071,23 @@ function construirPantalon(
     lGeo.setIndex(lIdx);
     finalizarGeometria(lGeo);
 
-    const lMesh = new THREE.Mesh(lGeo, opciones.materialPrincipal);
+    const lMesh = new THREE.Mesh(lGeo, matPant);
     lMesh.name = `pantalon-pierna-${lado > 0 ? "izq" : "der"}`;
-    registrarMalla(lMesh, lPesos);
+    registrarMalla(lMesh, lPesos, "pantalon_inferior");
     meshes.push(lMesh);
+
+    if (puntosBota.length >= 6) {
+      meshes.push(
+        construirDobladilloDesdeAnillo(
+          puntosBota,
+          matPant,
+          `dobladillo-bota-${lado > 0 ? "izq" : "der"}`,
+          "pantalon_inferior",
+          0.002,
+          0.007
+        )
+      );
+    }
   }
 
   return meshes;
@@ -1833,7 +2155,7 @@ function construirCinturonConLazo(
   finalizarGeometria(beltGeo);
   const beltMesh = new THREE.Mesh(beltGeo, mat);
   beltMesh.name = "cinturon-banda";
-  registrarMalla(beltMesh);
+  registrarMalla(beltMesh, undefined, "cinturon");
   objetos.push(beltMesh);
 
   // Ancla frontal del lazo 3D
@@ -1846,6 +2168,7 @@ function construirCinturonConLazo(
   const nudoMesh = new THREE.Mesh(nudoGeo, mat);
   nudoMesh.position.set(0, yCint, zFrente);
   nudoMesh.name = "cinturon-nudo";
+  registrarMalla(nudoMesh, undefined, "cinturon");
   objetos.push(nudoMesh);
 
   // Dos lazadas aplanadas izquierda y derecha
@@ -1875,7 +2198,7 @@ function construirCinturonConLazo(
     finalizarGeometria(loopGeo);
     const loopMesh = new THREE.Mesh(loopGeo, mat);
     loopMesh.name = `cinturon-lazada-${lado > 0 ? "izq" : "der"}`;
-    registrarMalla(loopMesh);
+    registrarMalla(loopMesh, undefined, "cinturon");
     objetos.push(loopMesh);
 
     // Cola colgante hacia abajo con caída orgánica
@@ -1899,7 +2222,7 @@ function construirCinturonConLazo(
     finalizarGeometria(colaGeo);
     const colaMesh = new THREE.Mesh(colaGeo, mat);
     colaMesh.name = `cinturon-cola-${lado > 0 ? "izq" : "der"}`;
-    registrarMalla(colaMesh);
+    registrarMalla(colaMesh, undefined, "cinturon");
     objetos.push(colaMesh);
   }
 
@@ -1965,7 +2288,7 @@ function construirBucketHat(
   );
   hatMesh.rotation.x = -0.04;
   hatMesh.name = "bucket-hat-3d";
-  registrarMalla(hatMesh);
+  registrarMalla(hatMesh, undefined, "sombrero");
   objetos.push(hatMesh);
 
   return {
@@ -2506,6 +2829,1035 @@ function poblarCosturasPantalon(
 }
 
 /**
+ * Construye bolsillos con tapa en relieve frontales y/o ribetes de bolsillo lateral en costura.
+ */
+function construirBolsillos3D(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  yInferiorTopM: number,
+  opciones: OpcionesMallaPrenda,
+  grupoCosturas: THREE.Group,
+  matCostura: THREE.LineDashedMaterial
+): { objetos: THREE.Object3D[]; etiquetaBolsillo?: Etiqueta3DAncla } {
+  const objetos: THREE.Object3D[] = [];
+  if (!config.bolsillosConTapa && !config.bolsillosLaterales) {
+    return { objetos };
+  }
+
+  const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
+  const matBolsillo =
+    config.esDosPiezas &&
+    opciones.materialSecundario &&
+    config.prenda !== "chaqueta"
+      ? opciones.materialSecundario
+      : (opciones.materialForroOVista ?? opciones.materialPrincipal);
+  let etiquetaBolsillo: Etiqueta3DAncla | undefined;
+
+  if (config.bolsillosConTapa) {
+    const esTopChaqueta =
+      config.prenda === "chaqueta" ||
+      config.prenda === "blusa" ||
+      config.dosPiezasArriba === "jacket_blazer";
+    const yCentroBolsillo = esTopChaqueta
+      ? clamp(yInferiorTopM + cmAMetros(9.0), perfil.caderaYM + cmAMetros(3), perfil.cinturaYM - cmAMetros(2))
+      : clamp(perfil.cinturaYM - cmAMetros(9.5), perfil.caderaYM + cmAMetros(2), perfil.cinturaYM - cmAMetros(4));
+
+    const btnGeo = new THREE.CylinderGeometry(0.006, 0.006, 0.0032, 12);
+    btnGeo.rotateX(Math.PI * 0.5);
+    const btnMat = new THREE.MeshStandardMaterial({
+      color: 0x3b322d,
+      roughness: 0.35,
+      metalness: 0.3,
+    });
+    const instBtnBolsillo = new THREE.InstancedMesh(btnGeo, btnMat, 2);
+    instBtnBolsillo.name = "bolsillos-botones";
+    instBtnBolsillo.castShadow = true;
+    instBtnBolsillo.userData.esHerraje = true;
+    instBtnBolsillo.userData.zonaPieza = "bolsillo";
+    const dummy = new THREE.Object3D();
+
+    [-1, 1].forEach((lado, idxBtn) => {
+      const thCentro = lado * 0.44;
+      const thMin = thCentro - 0.16;
+      const thMax = thCentro + 0.16;
+      const yTop = yCentroBolsillo + cmAMetros(5.2);
+      const yBot = yCentroBolsillo - cmAMetros(5.2);
+
+      // Parche inferior
+      const pos: number[] = [];
+      const uvs: number[] = [];
+      const idx: number[] = [];
+      const rows = 5;
+      const cols = 6;
+      for (let r = 0; r < rows; r++) {
+        const y = THREE.MathUtils.lerp(yTop, yBot, r / (rows - 1));
+        const an = evaluarPerfilEnY(perfil.anillosInterpolados, y);
+        const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.007;
+        for (let c = 0; c < cols; c++) {
+          const th = THREE.MathUtils.lerp(thMin, thMax, c / (cols - 1));
+          const x = (an.a + dr) * Math.sin(th);
+          const z = an.desplazamientoZ + (an.b + dr) * Math.cos(th);
+          pos.push(x, y, z);
+          uvs.push(x, y);
+        }
+      }
+      for (let r = 0; r < rows - 1; r++) {
+        for (let c = 0; c < cols - 1; c++) {
+          const a = r * cols + c;
+          const b = (r + 1) * cols + c;
+          const cN = r * cols + (c + 1);
+          const d = (r + 1) * cols + (c + 1);
+          idx.push(a, b, cN, cN, b, d);
+        }
+      }
+      const patchGeo = new THREE.BufferGeometry();
+      patchGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      patchGeo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+      patchGeo.setIndex(idx);
+      finalizarGeometria(patchGeo);
+      const patchMesh = new THREE.Mesh(patchGeo, matBolsillo);
+      patchMesh.name = `bolsillo-parche-${lado > 0 ? "izq" : "der"}`;
+      registrarMalla(patchMesh, undefined, "bolsillo");
+      objetos.push(patchMesh);
+
+      // Tapa superior en relieve
+      const muestrasTapa: MuestraTiraTorso[] = [];
+      for (let i = 0; i <= 5; i++) {
+        const th = THREE.MathUtils.lerp(thMin - 0.02, thMax + 0.02, i / 5);
+        const anT = evaluarPerfilEnY(perfil.anillosInterpolados, yTop);
+        const drT = calcularDeltaRadioM(config, yTop, perfil, ajusteStretch) + 0.0095;
+        muestrasTapa.push({
+          pos: new THREE.Vector3(
+            (anT.a + drT) * Math.sin(th),
+            yTop - cmAMetros(1.1),
+            anT.desplazamientoZ + (anT.b + drT) * Math.cos(th)
+          ),
+          normalOut: calcularNormalTorso(anT, th),
+        });
+      }
+      objetos.push(
+        construirTiraConRelieveSobreTorso(
+          muestrasTapa,
+          cmAMetros(3.4),
+          0.0038,
+          false,
+          perfil,
+          0.0085,
+          matBolsillo,
+          `bolsillo-tapa-${lado > 0 ? "izq" : "der"}`,
+          0.5,
+          "bolsillo"
+        )
+      );
+
+      // Botón centrado en la tapa
+      const anBtn = evaluarPerfilEnY(perfil.anillosInterpolados, yTop - cmAMetros(1.2));
+      const drBtn = calcularDeltaRadioM(config, yTop, perfil, ajusteStretch) + 0.0135;
+      dummy.position.set(
+        (anBtn.a + drBtn) * Math.sin(thCentro),
+        yTop - cmAMetros(1.4),
+        anBtn.desplazamientoZ + (anBtn.b + drBtn) * Math.cos(thCentro)
+      );
+      dummy.rotation.set(0, thCentro, 0);
+      dummy.updateMatrix();
+      instBtnBolsillo.setMatrixAt(idxBtn, dummy.matrix);
+
+      // Pespunte perimetral en U del parche
+      const ptsPespunte: THREE.Vector3[] = [
+        evaluarPuntoTorsoConOffset(perfil, config, yTop, thMin, ajusteStretch, 0.009),
+        evaluarPuntoTorsoConOffset(perfil, config, yBot, thMin, ajusteStretch, 0.009),
+        evaluarPuntoTorsoConOffset(perfil, config, yBot, thCentro, ajusteStretch, 0.009),
+        evaluarPuntoTorsoConOffset(perfil, config, yBot, thMax, ajusteStretch, 0.009),
+        evaluarPuntoTorsoConOffset(perfil, config, yTop, thMax, ajusteStretch, 0.009),
+      ];
+      grupoCosturas.add(
+        crearLineaPespunte(ptsPespunte, matCostura, `costura-bolsillo-tapa-${lado > 0 ? "izq" : "der"}`)
+      );
+
+      if (lado === 1) {
+        const pAnc = evaluarPuntoTorsoConOffset(
+          perfil,
+          config,
+          yCentroBolsillo,
+          thCentro,
+          ajusteStretch,
+          0.022
+        );
+        etiquetaBolsillo = {
+          id: "lbl-bolsillo",
+          texto: "Bolsillo",
+          posicionLocalM: [pAnc.x, pAnc.y, pAnc.z],
+          normalLocal: [0.35, 0, 0.94],
+        };
+      }
+    });
+
+    instBtnBolsillo.instanceMatrix.needsUpdate = true;
+    objetos.push(instBtnBolsillo);
+  }
+
+  if (
+    config.bolsillosLaterales &&
+    (config.prenda === "falda" ||
+      config.prenda === "vestido" ||
+      config.prenda === "pantalon" ||
+      config.prenda === "enterizo" ||
+      config.esDosPiezas)
+  ) {
+    const yBolTop = perfil.cinturaYM - cmAMetros(3.5);
+    const yBolBot = Math.max(perfil.caderaYM + cmAMetros(1.0), yBolTop - cmAMetros(14.5));
+
+    for (const lado of [-1, 1] as const) {
+      const muestrasVivo: MuestraTiraTorso[] = [];
+      for (let i = 0; i <= 6; i++) {
+        const t = i / 6;
+        const y = THREE.MathUtils.lerp(yBolTop, yBolBot, t);
+        const th = lado * THREE.MathUtils.lerp(1.16, 1.38, t);
+        const an = evaluarPerfilEnY(perfil.anillosInterpolados, y);
+        const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.0045;
+        muestrasVivo.push({
+          pos: new THREE.Vector3(
+            (an.a + dr) * Math.sin(th),
+            y,
+            an.desplazamientoZ + (an.b + dr) * Math.cos(th)
+          ),
+          normalOut: calcularNormalTorso(an, th),
+        });
+      }
+      objetos.push(
+        construirTiraConRelieveSobreTorso(
+          muestrasVivo,
+          cmAMetros(1.3),
+          0.0024,
+          false,
+          perfil,
+          0.004,
+          matBolsillo,
+          `bolsillo-lateral-vivo-${lado > 0 ? "izq" : "der"}`,
+          0.5,
+          "bolsillo"
+        )
+      );
+
+      grupoCosturas.add(
+        crearLineaPespunte(
+          muestrasVivo.map((m) => m.pos.clone().addScaledVector(m.normalOut, 0.003)),
+          matCostura,
+          `costura-bolsillo-lat-${lado > 0 ? "izq" : "der"}`
+        )
+      );
+
+      if (!etiquetaBolsillo && lado === 1) {
+        const pLat = muestrasVivo[3].pos.clone().addScaledVector(muestrasVivo[3].normalOut, 0.02);
+        etiquetaBolsillo = {
+          id: "lbl-bolsillo",
+          texto: "Bolsillo",
+          posicionLocalM: [pLat.x, pLat.y, pLat.z],
+          normalLocal: [0.85, 0, 0.52],
+        };
+      }
+    }
+  }
+
+  return { objetos, etiquetaBolsillo };
+}
+
+/**
+ * Construye pechera delantera, respaldo y tirantes continuos sobre hombros para Jardinera (`overall`).
+ */
+function construirPecheraYTirantesOverall(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  opciones: OpcionesMallaPrenda
+): { objetos: THREE.Object3D[]; etiquetaFrente: Etiqueta3DAncla } {
+  const objetos: THREE.Object3D[] = [];
+  const mat = opciones.materialPrincipal;
+  const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
+
+  const yTopBibFrente = perfil.bustoYM + cmAMetros(5.0);
+  const yTopBibEspalda = perfil.bustoYM + cmAMetros(3.5);
+  const yBase = perfil.cinturaYM - cmAMetros(1.2);
+
+  for (const ladoSpec of [
+    { nombre: "overall-pechera-frente", yTop: yTopBibFrente, thCentro: 0, semiTh: 0.44 },
+    { nombre: "overall-pechera-espalda", yTop: yTopBibEspalda, thCentro: Math.PI, semiTh: 0.42 },
+  ]) {
+    const rows = 8;
+    const cols = 10;
+    const pos: number[] = [];
+    const uvs: number[] = [];
+    const idx: number[] = [];
+    for (let r = 0; r < rows; r++) {
+      const tr = r / (rows - 1);
+      const y = THREE.MathUtils.lerp(ladoSpec.yTop, yBase, tr);
+      const an = evaluarPerfilEnY(perfil.anillosInterpolados, y);
+      const spanTh = THREE.MathUtils.lerp(ladoSpec.semiTh * 0.72, ladoSpec.semiTh, tr);
+      const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.0025;
+      for (let c = 0; c < cols; c++) {
+        const tc = c / (cols - 1);
+        const th = ladoSpec.thCentro + THREE.MathUtils.lerp(-spanTh, spanTh, tc);
+        const x = (an.a + dr) * Math.sin(th);
+        const z = an.desplazamientoZ + (an.b + dr) * Math.cos(th);
+        pos.push(x, y, z);
+        uvs.push(x, y);
+      }
+    }
+    for (let r = 0; r < rows - 1; r++) {
+      for (let c = 0; c < cols - 1; c++) {
+        const a = r * cols + c;
+        const b = (r + 1) * cols + c;
+        const cN = r * cols + (c + 1);
+        const d = (r + 1) * cols + (c + 1);
+        idx.push(a, b, cN, cN, b, d);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(idx);
+    finalizarGeometria(geo);
+    const m = new THREE.Mesh(geo, mat);
+    m.name = ladoSpec.nombre;
+    registrarMalla(m, undefined, "delantero");
+    objetos.push(m);
+  }
+
+  // Tirantes continuos sobre hombros + 2 botones metálicos de peto
+  const btnGeo = new THREE.CylinderGeometry(0.0085, 0.0085, 0.004, 14);
+  btnGeo.rotateX(Math.PI * 0.5);
+  const btnMat = new THREE.MeshStandardMaterial({
+    color: 0xc2934b,
+    roughness: 0.28,
+    metalness: 0.78,
+  });
+  const instBtnPeto = new THREE.InstancedMesh(btnGeo, btnMat, 2);
+  instBtnPeto.name = "overall-botones-peto";
+  instBtnPeto.castShadow = true;
+  instBtnPeto.userData.esHerraje = true;
+  instBtnPeto.userData.zonaPieza = "delantero";
+  const dummy = new THREE.Object3D();
+
+  [-1, 1].forEach((lado, idxBtn) => {
+    const samples: MuestraTiraTorso[] = [];
+    const pasos = 14;
+    for (let i = 0; i <= pasos; i++) {
+      const t = i / pasos;
+      let y: number;
+      let th: number;
+      if (t <= 0.5) {
+        const tf = t / 0.5;
+        y = THREE.MathUtils.lerp(yTopBibFrente - cmAMetros(1.0), perfil.hombroYM + cmAMetros(0.8), tf);
+        th = lado * THREE.MathUtils.lerp(0.28, 0.56, tf);
+      } else {
+        const tb = (t - 0.5) / 0.5;
+        y = THREE.MathUtils.lerp(perfil.hombroYM + cmAMetros(0.8), yTopBibEspalda - cmAMetros(1.0), tb);
+        th = lado * THREE.MathUtils.lerp(0.56, Math.PI - 0.28, tb);
+      }
+      const an = evaluarPerfilEnY(perfil.anillosInterpolados, clamp(y, perfil.musloYM, perfil.cuelloYM));
+      const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.004;
+      const nOut = calcularNormalTorso(an, th);
+      if (Math.abs(t - 0.5) < 0.18) {
+        nOut.y += 0.65;
+        nOut.normalize();
+      }
+      samples.push({
+        pos: new THREE.Vector3(
+          (an.a + dr) * Math.sin(th),
+          y,
+          an.desplazamientoZ + (an.b + dr) * Math.cos(th)
+        ),
+        normalOut: nOut,
+      });
+    }
+    objetos.push(
+      construirTiraConRelieveSobreTorso(
+        samples,
+        cmAMetros(3.4),
+        0.0032,
+        false,
+        perfil,
+        0.0035,
+        mat,
+        `overall-tirante-${lado > 0 ? "izq" : "der"}`,
+        0.5,
+        "delantero"
+      )
+    );
+
+    const pBtn = samples[0].pos.clone().addScaledVector(samples[0].normalOut, 0.005);
+    dummy.position.copy(pBtn);
+    dummy.rotation.set(0, lado * 0.28, 0);
+    dummy.updateMatrix();
+    instBtnPeto.setMatrixAt(idxBtn, dummy.matrix);
+  });
+
+  instBtnPeto.instanceMatrix.needsUpdate = true;
+  objetos.push(instBtnPeto);
+
+  const busto = perfil.anillosClave.busto;
+  return {
+    objetos,
+    etiquetaFrente: {
+      id: "lbl-delantero",
+      texto: "Delantero",
+      posicionLocalM: [0, busto.y, busto.desplazamientoZ + busto.b + cmAMetros(2)],
+      normalLocal: [0, 0, 1],
+    },
+  };
+}
+
+/**
+ * Construye delantal de taller (`apron`) con pechera delantera, falda envolvente frontal,
+ * cinta de cuello, tiras de cintura y bolsillo central dividido.
+ */
+function construirDelantal3D(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  opciones: OpcionesMallaPrenda,
+  grupoCosturas: THREE.Group,
+  matCostura: THREE.LineDashedMaterial
+): { objetos: THREE.Object3D[]; etiquetaFrente: Etiqueta3DAncla } {
+  const objetos: THREE.Object3D[] = [];
+  const mat = opciones.materialPrincipal;
+  const matVista = opciones.materialForroOVista ?? mat;
+  const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
+
+  const yTopBib = perfil.hombroYM - cmAMetros(4.5);
+  const yCint = perfil.cinturaYM;
+  const yBotApron = clamp(
+    yCint - cmAMetros(46),
+    Math.max(0.14, perfil.alturaRodillaM - cmAMetros(4)),
+    perfil.caderaYM - cmAMetros(8)
+  );
+
+  // Cuerpo delantero continuo del delantal (pechera estrecha arriba -> envolvente lateral abajo)
+  const rows = 20;
+  const segs = 24;
+  const pos: number[] = [];
+  const uvs: number[] = [];
+  const idx: number[] = [];
+  const pesos = new Float32Array(rows * (segs + 1));
+
+  for (let r = 0; r < rows; r++) {
+    const tr = r / (rows - 1);
+    const y = THREE.MathUtils.lerp(yTopBib, yBotApron, tr);
+    const an = evaluarPerfilEnY(
+      perfil.anillosInterpolados,
+      Math.max(y, perfil.caderaYM)
+    );
+    const fracSisa = smoothstep(yTopBib, yCint, y);
+    const maxTheta = THREE.MathUtils.lerp(0.46, 1.48, fracSisa);
+    const extraFalda = y < yCint ? smoothstep(yCint, yBotApron, y) * cmAMetros(5.5) : 0;
+    const dr = calcularDeltaRadioM(config, Math.max(y, yCint), perfil, ajusteStretch) + 0.004 + extraFalda;
+
+    for (let s = 0; s <= segs; s++) {
+      const th = THREE.MathUtils.lerp(-maxTheta, maxTheta, s / segs);
+      const px = (an.a + dr) * Math.sin(th);
+      const pz = an.desplazamientoZ + (an.b + dr) * Math.cos(th);
+      pos.push(px, y, pz);
+      uvs.push(px, y);
+      pesos[r * (segs + 1) + s] = y < yCint ? Math.pow((yCint - y) / Math.max(0.1, yCint - yBotApron), 1.3) * 0.6 : 0;
+    }
+  }
+  const cols = segs + 1;
+  for (let r = 0; r < rows - 1; r++) {
+    for (let s = 0; s < segs; s++) {
+      const a = r * cols + s;
+      const b = (r + 1) * cols + s;
+      const c = r * cols + (s + 1);
+      const d = (r + 1) * cols + (s + 1);
+      idx.push(a, b, c, c, b, d);
+    }
+  }
+  const apronGeo = new THREE.BufferGeometry();
+  apronGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  apronGeo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  apronGeo.setIndex(idx);
+  finalizarGeometria(apronGeo);
+  const apronMesh = new THREE.Mesh(apronGeo, mat);
+  apronMesh.name = "delantal-cuerpo";
+  registrarMalla(apronMesh, pesos, "delantero");
+  objetos.push(apronMesh);
+
+  // Cinta de cuello alrededor de la nuca
+  const muestrasCuello: MuestraTiraTorso[] = [];
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16;
+    const th = THREE.MathUtils.lerp(0.38, Math.PI * 2 - 0.38, t);
+    const esAtras = Math.abs(Math.sin(t * Math.PI));
+    const y = THREE.MathUtils.lerp(yTopBib, perfil.cuelloYM - cmAMetros(0.4), esAtras);
+    const an = evaluarPerfilEnY(perfil.anillosInterpolados, y);
+    const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.006;
+    muestrasCuello.push({
+      pos: new THREE.Vector3(
+        (an.a + dr) * Math.sin(th),
+        y,
+        an.desplazamientoZ + (an.b + dr) * Math.cos(th)
+      ),
+      normalOut: calcularNormalTorso(an, th),
+    });
+  }
+  objetos.push(
+    construirTiraConRelieveSobreTorso(
+      muestrasCuello,
+      cmAMetros(2.2),
+      0.0028,
+      false,
+      perfil,
+      0.004,
+      matVista,
+      "delantal-tira-cuello",
+      0.5,
+      "cuello_vista"
+    )
+  );
+
+  // Cinta de cintura alrededor completo
+  const muestrasCint: MuestraTiraTorso[] = [];
+  for (let i = 0; i < 32; i++) {
+    const th = ((i / 32) - 0.5) * Math.PI * 2;
+    const an = evaluarPerfilEnY(perfil.anillosInterpolados, yCint);
+    const dr = calcularDeltaRadioM(config, yCint, perfil, ajusteStretch) + 0.006;
+    muestrasCint.push({
+      pos: new THREE.Vector3(
+        (an.a + dr) * Math.sin(th),
+        yCint,
+        an.desplazamientoZ + (an.b + dr) * Math.cos(th)
+      ),
+      normalOut: calcularNormalTorso(an, th),
+    });
+  }
+  objetos.push(
+    construirTiraConRelieveSobreTorso(
+      muestrasCint,
+      cmAMetros(2.6),
+      0.0028,
+      true,
+      perfil,
+      0.005,
+      matVista,
+      "delantal-tira-cintura",
+      0.5,
+      "cinturon"
+    )
+  );
+
+  // Bolsillo delantero dividido
+  const yBolTop = yCint - cmAMetros(5.5);
+  const yBolBot = yBolTop - cmAMetros(18.0);
+  const posB: number[] = [];
+  const uvsB: number[] = [];
+  const idxB: number[] = [];
+  for (let r = 0; r < 6; r++) {
+    const y = THREE.MathUtils.lerp(yBolTop, yBolBot, r / 5);
+    const an = evaluarPerfilEnY(perfil.anillosInterpolados, Math.max(y, perfil.caderaYM));
+    const dr = calcularDeltaRadioM(config, Math.max(y, yCint), perfil, ajusteStretch) + 0.0085;
+    for (let c = 0; c < 8; c++) {
+      const th = THREE.MathUtils.lerp(-0.48, 0.48, c / 7);
+      const px = (an.a + dr) * Math.sin(th);
+      const pz = an.desplazamientoZ + (an.b + dr) * Math.cos(th);
+      posB.push(px, y, pz);
+      uvsB.push(px, y);
+    }
+  }
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 7; c++) {
+      const a = r * 8 + c;
+      const b = (r + 1) * 8 + c;
+      const cN = r * 8 + (c + 1);
+      const d = (r + 1) * 8 + (c + 1);
+      idxB.push(a, b, cN, cN, b, d);
+    }
+  }
+  const pocketGeo = new THREE.BufferGeometry();
+  pocketGeo.setAttribute("position", new THREE.Float32BufferAttribute(posB, 3));
+  pocketGeo.setAttribute("uv", new THREE.Float32BufferAttribute(uvsB, 2));
+  pocketGeo.setIndex(idxB);
+  finalizarGeometria(pocketGeo);
+  const pocketMesh = new THREE.Mesh(pocketGeo, matVista);
+  pocketMesh.name = "delantal-bolsillo";
+  registrarMalla(pocketMesh, undefined, "bolsillo");
+  objetos.push(pocketMesh);
+
+  // Costura divisoria central del bolsillo
+  const pMidTop = evaluarPuntoTorsoConOffset(perfil, config, yBolTop, 0, ajusteStretch, 0.011);
+  const pMidBot = evaluarPuntoTorsoConOffset(perfil, config, yBolBot, 0, ajusteStretch, 0.011);
+  grupoCosturas.add(crearLineaPespunte([pMidTop, pMidBot], matCostura, "costura-delantal-bolsillo"));
+
+  const anBusto = perfil.anillosClave.busto;
+  return {
+    objetos,
+    etiquetaFrente: {
+      id: "lbl-delantero",
+      texto: "Delantero",
+      posicionLocalM: [0, anBusto.y - cmAMetros(2), anBusto.desplazamientoZ + anBusto.b + cmAMetros(3)],
+      normalLocal: [0, 0, 1],
+    },
+  };
+}
+
+/**
+ * Construye Cartuchera / Neceser Textil 3D acolchada con fuelle inferior,
+ * cremallera superior metálica, cursor y presillas laterales (`zipper_pouch`).
+ */
+function construirCartuchera3D(
+  opciones: OpcionesMallaPrenda,
+  grupoCosturas: THREE.Group,
+  matCostura: THREE.LineDashedMaterial
+): { objetos: THREE.Object3D[]; etiquetaFrente: Etiqueta3DAncla } {
+  const objetos: THREE.Object3D[] = [];
+  const mat = opciones.materialPrincipal;
+  const matVista = opciones.materialForroOVista ?? mat;
+  const cy = 0.92;
+  const wM = 0.22;
+  const hM = 0.13;
+  const dM = 0.082;
+
+  // Cuerpo acolchado suavizado (BoxGeometry subdividida + curvatura orgánica de neceser)
+  const pouchGeo = new THREE.BoxGeometry(wM, hM, dM, 14, 10, 6);
+  const posAttr = pouchGeo.getAttribute("position") as THREE.BufferAttribute;
+  for (let i = 0; i < posAttr.count; i++) {
+    const ux = posAttr.getX(i) / (wM * 0.5);
+    const uy = posAttr.getY(i) / (hM * 0.5);
+    const uz = posAttr.getZ(i) / (dM * 0.5);
+    // Se estrecha ligeramente arriba hacia la cremallera y abomba en el centro
+    const taperTop = uy > 0 ? 1 - uy * 0.42 : 1;
+    const bulgeZ = 1 + (1 - Math.abs(ux) * 0.7) * (1 - uy * uy) * 0.22;
+    const x = ux * (wM * 0.5) * (1 - 0.04 * uy * uy);
+    const y = cy + uy * (hM * 0.5);
+    const z = uz * (dM * 0.5) * taperTop * bulgeZ;
+    posAttr.setXYZ(i, x, y, z);
+  }
+  posAttr.needsUpdate = true;
+  // Escalar UVs al patrón de 8 cm reales
+  const uvAttr = pouchGeo.getAttribute("uv") as THREE.BufferAttribute;
+  for (let i = 0; i < uvAttr.count; i++) {
+    uvAttr.setXY(i, uvAttr.getX(i) * wM, uvAttr.getY(i) * hM);
+  }
+  uvAttr.needsUpdate = true;
+  finalizarGeometria(pouchGeo);
+
+  const pouchMesh = new THREE.Mesh(pouchGeo, mat);
+  pouchMesh.name = "cartuchera-cuerpo-3d";
+  registrarMalla(pouchMesh, undefined, "cartuchera");
+  objetos.push(pouchMesh);
+
+  // Presillas laterales de tela
+  for (const lado of [-1, 1] as const) {
+    const tabGeo = new THREE.BoxGeometry(0.022, 0.018, 0.024);
+    finalizarGeometria(tabGeo);
+    const tabMesh = new THREE.Mesh(tabGeo, matVista);
+    tabMesh.position.set(lado * (wM * 0.5 + 0.008), cy + hM * 0.44, 0);
+    tabMesh.name = `cartuchera-presilla-${lado > 0 ? "izq" : "der"}`;
+    registrarMalla(tabMesh, undefined, "cartuchera");
+    objetos.push(tabMesh);
+  }
+
+  // Cremallera superior metálica + tirador
+  const zipMat = new THREE.MeshStandardMaterial({
+    color: 0xbec5cd,
+    roughness: 0.26,
+    metalness: 0.85,
+  });
+  const zipGeo = new THREE.BoxGeometry(wM * 0.96, 0.009, 0.012);
+  const zipMesh = new THREE.Mesh(zipGeo, zipMat);
+  zipMesh.position.set(0, cy + hM * 0.5 + 0.003, 0);
+  zipMesh.name = "cartuchera-cremallera";
+  zipMesh.castShadow = true;
+  zipMesh.userData.esHerraje = true;
+  zipMesh.userData.zonaPieza = "cartuchera";
+  objetos.push(zipMesh);
+
+  const pullGeo = new THREE.BoxGeometry(0.012, 0.022, 0.005);
+  const pullMesh = new THREE.Mesh(pullGeo, zipMat);
+  pullMesh.position.set(wM * 0.34, cy + hM * 0.5 + 0.004, 0.012);
+  pullMesh.rotation.x = 0.45;
+  pullMesh.name = "cartuchera-tirador";
+  pullMesh.castShadow = true;
+  pullMesh.userData.esHerraje = true;
+  pullMesh.userData.zonaPieza = "cartuchera";
+  objetos.push(pullMesh);
+
+  // Costura frontal lateral en modo "Ver Costuras"
+  const offsetZ = dM * 0.52;
+  grupoCosturas.add(
+    crearLineaPespunte(
+      [
+        new THREE.Vector3(-wM * 0.48, cy + hM * 0.42, 0.012),
+        new THREE.Vector3(-wM * 0.48, cy - hM * 0.46, offsetZ * 0.4),
+        new THREE.Vector3(wM * 0.48, cy - hM * 0.46, offsetZ * 0.4),
+        new THREE.Vector3(wM * 0.48, cy + hM * 0.42, 0.012),
+      ],
+      matCostura,
+      "costura-cartuchera"
+    )
+  );
+
+  return {
+    objetos,
+    etiquetaFrente: {
+      id: "lbl-delantero",
+      texto: "Delantero",
+      posicionLocalM: [0, cy, dM * 0.65],
+      normalLocal: [0, 0, 1],
+    },
+  };
+}
+
+/**
+ * Construye 3 aros de cinta métrica amarilla de modistería alrededor de Busto, Cintura y Cadera
+ * con sus anclas de medida real en cm para mostrar sobre la prenda cuando está activo Ver Costuras / Calce.
+ */
+function poblarCintasMetricas3D(
+  perfil: PerfilCuerpo,
+  config: ConfigPrenda,
+  ajusteStretchM: number,
+  grupoCintas: THREE.Group,
+  etiquetas: Etiqueta3DAncla[]
+): void {
+  const matCinta = new THREE.MeshStandardMaterial({
+    color: 0xe5b842,
+    roughness: 0.45,
+    metalness: 0.05,
+    side: THREE.DoubleSide,
+  });
+
+  const niveles = [
+    {
+      id: "lbl-medida-busto",
+      nombre: "cinta-busto",
+      anillo: perfil.anillosClave.busto,
+      etiqueta: `Busto ${Math.round(perfil.anillosClave.busto.perimetroObjetivoCm)} cm`,
+      incluir: config.prenda !== "falda" && config.prenda !== "pantalon",
+      thetaEtiqueta: -0.78,
+    },
+    {
+      id: "lbl-medida-cintura",
+      nombre: "cinta-cintura",
+      anillo: perfil.anillosClave.cintura,
+      etiqueta: `Cintura ${Math.round(perfil.anillosClave.cintura.perimetroObjetivoCm)} cm`,
+      incluir: true,
+      thetaEtiqueta: 0.78,
+    },
+    {
+      id: "lbl-medida-cadera",
+      nombre: "cinta-cadera",
+      anillo: perfil.anillosClave.cadera,
+      etiqueta: `Cadera ${Math.round(perfil.anillosClave.cadera.perimetroObjetivoCm)} cm`,
+      incluir: config.prenda !== "blusa",
+      thetaEtiqueta: -0.72,
+    },
+  ];
+
+  const segs = 40;
+  const semiAlto = 0.0045;
+
+  for (const niv of niveles) {
+    if (!niv.incluir) continue;
+    const pos: number[] = [];
+    const idx: number[] = [];
+    const y = niv.anillo.y;
+
+    for (let s = 0; s <= segs; s++) {
+      const th = ((s / segs) - 0.5) * Math.PI * 2;
+      const pt = evaluarPuntoTorsoConOffset(
+        perfil,
+        config,
+        y,
+        th,
+        ajusteStretchM,
+        0.011
+      );
+      pos.push(pt.x, y + semiAlto, pt.z, pt.x, y - semiAlto, pt.z);
+    }
+    for (let s = 0; s < segs; s++) {
+      const a = s * 2;
+      idx.push(a, a + 1, a + 2, a + 2, a + 1, a + 3);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, matCinta);
+    mesh.name = niv.nombre;
+    mesh.userData.esHerraje = true;
+    grupoCintas.add(mesh);
+
+    const ptAnc = evaluarPuntoTorsoConOffset(
+      perfil,
+      config,
+      y,
+      niv.thetaEtiqueta,
+      ajusteStretchM,
+      0.025
+    );
+    const normal = calcularNormalTorso(niv.anillo, niv.thetaEtiqueta);
+    etiquetas.push({
+      id: niv.id,
+      texto: niv.etiqueta,
+      posicionLocalM: [ptAnc.x, ptAnc.y, ptAnc.z],
+      normalLocal: [normal.x, normal.y, normal.z],
+    });
+  }
+}
+
+/**
+ * Mapea el ID de una pieza 2D (`PatternPiece.id`) a la zona anatómica equivalente en la malla 3D.
+ */
+export function mapearPieceIdAZona3D(pieceId: string): ZonaPieza3D | null {
+  if (!pieceId || pieceId === "all") return null;
+  const id = pieceId.toLowerCase();
+
+  if (id.includes("bucket")) return "sombrero";
+  if (id.includes("pouch")) return "cartuchera";
+  if (id.includes("ruffle")) return "bolero";
+  if (id.includes("pocket") || id.includes("flap")) return "bolsillo";
+  if (id.includes("waist_tie") || id.includes("waistband") || id.includes("ties")) {
+    return "cinturon";
+  }
+  if (
+    id.includes("collar") ||
+    id.includes("facing") ||
+    id.includes("placket") ||
+    id.includes("lapel")
+  ) {
+    return "cuello_vista";
+  }
+  if (id.includes("sleeve")) return "manga";
+  if (id.includes("skirt")) return "falda_inferior";
+  if (id.includes("leg") || id.includes("pants")) return "pantalon_inferior";
+  if (id.includes("back")) return "espalda";
+  if (
+    id.includes("front") ||
+    id.includes("bib") ||
+    id.includes("strap") ||
+    id.includes("apron_body") ||
+    id.includes("baby") ||
+    id.includes("kids_")
+  ) {
+    return "delantero";
+  }
+  return null;
+}
+
+/**
+ * Busca la pieza del molde 2D más adecuada al tocar una zona de la malla 3D.
+ */
+export function buscarPieceIdPorZona3D(
+  zona: ZonaPieza3D,
+  pieces: readonly PatternPiece[],
+  thetaClick = 0
+): string | null {
+  if (pieces.length === 0) return null;
+  const esEspaldaClick = Math.abs(thetaClick) > Math.PI * 0.55;
+
+  if (zona === "delantero" || zona === "espalda") {
+    const preferidas = esEspaldaClick
+      ? ["back", "top_back", "pajama_top_back", "kids_back", "overall_bib_back"]
+      : ["front", "top_front", "pajama_top_front", "kids_front", "overall_bib_front", "apron_body"];
+    for (const pId of preferidas) {
+      const m = pieces.find((p) => p.id === pId);
+      if (m) return m.id;
+    }
+  }
+
+  // Coincidencia exacta por zona mapeada
+  for (const p of pieces) {
+    if (mapearPieceIdAZona3D(p.id) === zona) {
+      return p.id;
+    }
+  }
+  // Fallback para vestidos de 1 panel donde delantero cubre también falda
+  if (zona === "falda_inferior") {
+    const alt = pieces.find((p) => p.id === "front" || p.id === "back");
+    if (alt) return alt.id;
+  }
+  return pieces[0]?.id ?? null;
+}
+
+function distanciaASegmentoCapsula(
+  px: number,
+  py: number,
+  pz: number,
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+  rA: number,
+  rB: number
+): number {
+  const ax = b[0] - a[0];
+  const ay = b[1] - a[1];
+  const az = b[2] - a[2];
+  const lenSq = ax * ax + ay * ay + az * az;
+  const t =
+    lenSq > 1e-8
+      ? clamp(((px - a[0]) * ax + (py - a[1]) * ay + (pz - a[2]) * az) / lenSq, 0, 1)
+      : 0;
+  const qx = a[0] + ax * t;
+  const qy = a[1] + ay * t;
+  const qz = a[2] + az * t;
+  const dist = Math.hypot(px - qx, py - qy, pz - qz);
+  const rCuerpo = THREE.MathUtils.lerp(rA, rB, t);
+  return Math.max(0, dist - rCuerpo);
+}
+
+/**
+ * Calcula atributos `color` de mapa térmico de calce/holgura (`Ceñido`, `Cómodo`, `Holgado`)
+ * y conmuta al material `vertexColors` en 0 ms o restaura el material textil original.
+ */
+export function aplicarMapaCalceEnPrenda(
+  grupoPrenda: THREE.Group,
+  perfil: PerfilCuerpo,
+  matMapaCalce: THREE.MeshPhysicalMaterial,
+  activo: boolean
+): void {
+  const cCenida = new THREE.Color("#D96B43"); // Terracota cálido (< 2.5 cm)
+  const cComodo = new THREE.Color("#3B7A57"); // Verde salvia (2.5 - 8.5 cm)
+  const cHolgado = new THREE.Color("#3B6E8C"); // Azul atelier (> 8.5 cm)
+  const colTmp = new THREE.Color();
+
+  grupoPrenda.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh) || obj.userData.esHerraje) return;
+
+    if (!activo) {
+      if (obj.userData.materialOriginal) {
+        obj.material = obj.userData.materialOriginal;
+      }
+      return;
+    }
+
+    const geo = obj.geometry;
+    const posAttr = geo.getAttribute("position");
+    if (posAttr instanceof THREE.BufferAttribute && !geo.userData.fitColorsComputed) {
+      const colors = new Float32Array(posAttr.count * 3);
+      const zona = obj.userData.zonaPieza as ZonaPieza3D | undefined;
+      const { brazoIzq, brazoDer, piernaIzq, piernaDer } = perfil.trayectorias;
+
+      for (let i = 0; i < posAttr.count; i++) {
+        const px = posAttr.getX(i);
+        const py = posAttr.getY(i);
+        const pz = posAttr.getZ(i);
+        let deltaRM = 0.015;
+
+        if (zona === "manga") {
+          const b = px < 0 ? brazoIzq : brazoDer;
+          const dSup = distanciaASegmentoCapsula(
+            px,
+            py,
+            pz,
+            b.hombro,
+            b.codo,
+            b.radioHombroM,
+            b.radioCodoM
+          );
+          const dAnt = distanciaASegmentoCapsula(
+            px,
+            py,
+            pz,
+            b.codo,
+            b.muneca,
+            b.radioCodoM,
+            b.radioMunecaM
+          );
+          deltaRM = Math.min(dSup, dAnt);
+        } else if (zona === "pantalon_inferior" && py < perfil.caderaYM) {
+          const p = px < 0 ? piernaIzq : piernaDer;
+          const dMus = distanciaASegmentoCapsula(
+            px,
+            py,
+            pz,
+            p.cadera,
+            p.rodilla,
+            p.radioMusloM,
+            p.radioRodillaM
+          );
+          const dPant = distanciaASegmentoCapsula(
+            px,
+            py,
+            pz,
+            p.rodilla,
+            p.tobillo,
+            p.radioRodillaM,
+            p.radioTobilloM
+          );
+          deltaRM = Math.min(dMus, dPant);
+        } else if (zona === "sombrero") {
+          const cc = perfil.trayectorias.centroCabeza;
+          const distCab = Math.hypot(px - cc[0], pz - cc[2]);
+          deltaRM = Math.max(0, distCab - perfil.trayectorias.radioCabezaX);
+        } else if (zona === "cartuchera") {
+          deltaRM = 0.01;
+        } else {
+          const an = evaluarPerfilEnY(
+            perfil.anillosInterpolados,
+            clamp(py, perfil.musloYM, perfil.cuelloYM)
+          );
+          const dx = px;
+          const dz = pz - an.desplazamientoZ;
+          const rVert = Math.hypot(dx, dz);
+          const theta = Math.atan2(dx, dz);
+          const rTorso = Math.hypot(an.a * Math.sin(theta), an.b * Math.cos(theta));
+          deltaRM = Math.max(0, rVert - rTorso);
+        }
+
+        const holguraPerimCm = deltaRM * 2 * Math.PI * 100;
+        if (holguraPerimCm <= 2.5) {
+          const t = clamp(holguraPerimCm / 2.5, 0, 1);
+          colTmp.copy(cCenida).lerp(cComodo, t * 0.35);
+        } else if (holguraPerimCm <= 8.5) {
+          const t = clamp((holguraPerimCm - 2.5) / 6.0, 0, 1);
+          colTmp.copy(cComodo).lerp(cHolgado, t * 0.28);
+        } else {
+          const t = clamp((holguraPerimCm - 8.5) / 14.0, 0, 1);
+          colTmp.copy(cComodo).lerp(cHolgado, 0.35 + t * 0.65);
+        }
+
+        colors[i * 3] = colTmp.r;
+        colors[i * 3 + 1] = colTmp.g;
+        colors[i * 3 + 2] = colTmp.b;
+      }
+
+      geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+      geo.userData.fitColorsComputed = true;
+    }
+
+    obj.material = matMapaCalce;
+  });
+}
+
+/**
+ * Resalta las mallas correspondientes a la pieza 2D seleccionada (en modo textura normal)
+ * o restaura todas las mallas a su material base.
+ */
+export function aplicarResaltadoPieza(
+  grupoPrenda: THREE.Group,
+  activePieceId: string | undefined,
+  matResaltado: THREE.MeshPhysicalMaterial,
+  mapaCalceActivo: boolean
+): void {
+  if (mapaCalceActivo) return;
+  const zonaActiva = activePieceId ? mapearPieceIdAZona3D(activePieceId) : null;
+
+  grupoPrenda.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh) || obj.userData.esHerraje) return;
+    if (!obj.userData.materialOriginal) return;
+
+    if (!zonaActiva) {
+      obj.material = obj.userData.materialOriginal;
+      return;
+    }
+
+    const zonaMesh = obj.userData.zonaPieza as ZonaPieza3D | undefined;
+    // "espalda" y "delantero" comparten corpiño continuo en 3D
+    const coincide =
+      zonaMesh === zonaActiva ||
+      (zonaActiva === "espalda" && zonaMesh === "delantero");
+
+    obj.material = coincide ? matResaltado : obj.userData.materialOriginal;
+  });
+}
+
+/**
  * Proyecta las anclas 3D al viewport HTML usando `vector.project(camera)` y oculta
  * automáticamente cualquier etiqueta que quede detrás del maniquí o fuera de pantalla.
  */
@@ -2571,6 +3923,10 @@ export function construirMallaPrenda(
   grupoCosturas.name = "costuras-pinzas-3d";
   grupoCosturas.visible = opciones.mostrarCosturas;
 
+  const grupoCintasMetricas = new THREE.Group();
+  grupoCintasMetricas.name = "cintas-metricas-3d";
+  grupoCintasMetricas.visible = opciones.mostrarCosturas;
+
   const matCostura = crearMaterialCosturaTerracota();
   const ajusteStretch = opciones.ajusteTelaStretchM ?? 0;
 
@@ -2598,46 +3954,116 @@ export function construirMallaPrenda(
     etiquetas.push(hat.etiquetaFrente);
     poblarCosturasSombrero(perfil, grupoCosturas, matCostura);
     grupo.add(grupoCosturas);
-    return { grupo, grupoCosturas, etiquetas, triangulosTotales };
+    grupo.add(grupoCintasMetricas);
+    return { grupo, grupoCosturas, grupoCintasMetricas, etiquetas, triangulosTotales };
   }
 
+  if (config.subEstiloEspecial === "zipper_pouch") {
+    const pouch = construirCartuchera3D(opciones, grupoCosturas, matCostura);
+    pouch.objetos.forEach(contarYAgregar);
+    etiquetas.push(pouch.etiquetaFrente);
+    grupo.add(grupoCosturas);
+    grupo.add(grupoCintasMetricas);
+    return { grupo, grupoCosturas, grupoCintasMetricas, etiquetas, triangulosTotales };
+  }
+
+  if (config.subEstiloEspecial === "apron") {
+    const delantal = construirDelantal3D(
+      perfil,
+      config,
+      opciones,
+      grupoCosturas,
+      matCostura
+    );
+    delantal.objetos.forEach(contarYAgregar);
+    etiquetas.push(delantal.etiquetaFrente);
+    poblarCintasMetricas3D(perfil, config, ajusteStretch, grupoCintasMetricas, etiquetas);
+    grupo.add(grupoCosturas);
+    grupo.add(grupoCintasMetricas);
+    return { grupo, grupoCosturas, grupoCintasMetricas, etiquetas, triangulosTotales };
+  }
+
+  const esOverall = config.subEstiloEspecial === "overall";
+  const esBodyInfantil = config.subEstiloEspecial === "baby_bodysuit";
+
   const requiereParteSuperior =
-    config.prenda === "vestido" ||
-    config.prenda === "blusa" ||
-    config.prenda === "chaqueta" ||
-    config.prenda === "enterizo" ||
-    Boolean(config.esDosPiezas);
+    !esOverall &&
+    (config.prenda === "vestido" ||
+      config.prenda === "blusa" ||
+      config.prenda === "chaqueta" ||
+      config.prenda === "enterizo" ||
+      Boolean(config.esDosPiezas));
 
   const requiereFalda =
-    config.prenda === "falda" ||
-    config.prenda === "vestido" ||
-    (Boolean(config.esDosPiezas) && config.dosPiezasAbajo !== "pants");
+    !esBodyInfantil &&
+    !esOverall &&
+    (config.prenda === "falda" ||
+      config.prenda === "vestido" ||
+      (Boolean(config.esDosPiezas) && config.dosPiezasAbajo !== "pants"));
 
   const requierePantalon =
+    esOverall ||
     config.prenda === "pantalon" ||
     config.prenda === "enterizo" ||
     (Boolean(config.esDosPiezas) && config.dosPiezasAbajo === "pants");
 
   let etiquetaPinza: Etiqueta3DAncla | undefined;
+  let yInferiorTopM = perfil.cinturaYM;
 
-  if (requiereParteSuperior) {
-    let yInferiorTopM = perfil.cinturaYM;
-    if (config.prenda === "blusa" || config.prenda === "chaqueta") {
+  if (esOverall) {
+    const overall = construirPecheraYTirantesOverall(perfil, config, opciones);
+    overall.objetos.forEach(contarYAgregar);
+    etiquetas.push(overall.etiquetaFrente);
+  } else if (requiereParteSuperior) {
+    let extraOffsetRadialM = 0;
+
+    if (config.esDosPiezas) {
+      const topMult = clamp(config.proporcionesFoto?.topLengthMultiplier ?? 1, 0.72, 1.32);
+      if (config.dosPiezasArriba === "crop_top") {
+        const cropDrop = clamp(cmAMetros(30) * topMult, cmAMetros(18), perfil.cuelloYM - perfil.cinturaYM - cmAMetros(2.5));
+        yInferiorTopM = clamp(
+          perfil.cuelloYM - cropDrop,
+          perfil.cinturaYM + cmAMetros(3.5),
+          perfil.bustoYM - cmAMetros(2.0)
+        );
+      } else if (config.dosPiezasArriba === "jacket_blazer") {
+        yInferiorTopM = clamp(
+          perfil.cinturaYM - cmAMetros(13.0) * topMult,
+          perfil.caderaYM - cmAMetros(2.0),
+          perfil.cinturaYM - cmAMetros(5.0)
+        );
+        extraOffsetRadialM = 0.0055;
+      } else {
+        yInferiorTopM = clamp(
+          perfil.cinturaYM - cmAMetros(6.5) * topMult,
+          perfil.caderaYM,
+          perfil.cinturaYM - cmAMetros(1.5)
+        );
+        extraOffsetRadialM = 0.0045;
+      }
+    } else if (config.prenda === "blusa" || config.prenda === "chaqueta") {
       const largoPrendaTopM = clamp(
         cmAMetros(config.largoDeseado),
-        cmAMetros(30),
-        perfil.cuelloYM - perfil.caderaYM + cmAMetros(5)
+        cmAMetros(28),
+        perfil.cuelloYM - perfil.caderaYM + cmAMetros(6)
       );
       yInferiorTopM = Math.max(
-        perfil.caderaYM - cmAMetros(4),
+        perfil.caderaYM - cmAMetros(5),
         perfil.cuelloYM - largoPrendaTopM
       );
     } else if (config.corteImperio) {
       yInferiorTopM = perfil.anillosClave.bajoBusto.y;
     }
 
-    const corp = construirCorpino(perfil, config, yInferiorTopM, opciones);
+    const corp = construirCorpino(
+      perfil,
+      config,
+      yInferiorTopM,
+      opciones,
+      extraOffsetRadialM
+    );
     contarYAgregar(corp.mesh);
+    if (corp.extras) corp.extras.forEach(contarYAgregar);
     if (corp.etiquetaFrente) etiquetas.push(corp.etiquetaFrente);
 
     if (config.escote === "wrap") {
@@ -2676,11 +4102,12 @@ export function construirMallaPrenda(
 
   // Costura de corte horizontal en cintura si la prenda lleva unión/pretina en cintura
   const llevaCorteCintura =
-    config.prenda === "vestido" ||
-    config.prenda === "enterizo" ||
-    config.prenda === "falda" ||
-    config.prenda === "pantalon" ||
-    Boolean(config.esDosPiezas);
+    !esBodyInfantil &&
+    (config.prenda === "vestido" ||
+      config.prenda === "enterizo" ||
+      config.prenda === "falda" ||
+      config.prenda === "pantalon" ||
+      Boolean(config.esDosPiezas));
 
   if (llevaCorteCintura) {
     const yCorteCintura =
@@ -2758,7 +4185,7 @@ export function construirMallaPrenda(
       etiquetaPinza = resCostPant.etiquetaPinza;
     }
 
-    if (!requiereParteSuperior) {
+    if (!requiereParteSuperior && !esOverall) {
       const cad = perfil.anillosClave.cadera;
       etiquetas.push({
         id: "lbl-delantero",
@@ -2767,6 +4194,19 @@ export function construirMallaPrenda(
         normalLocal: [0, 0, 1],
       });
     }
+  }
+
+  const resBolsillos = construirBolsillos3D(
+    perfil,
+    config,
+    yInferiorTopM,
+    opciones,
+    grupoCosturas,
+    matCostura
+  );
+  resBolsillos.objetos.forEach(contarYAgregar);
+  if (resBolsillos.etiquetaBolsillo) {
+    etiquetas.push(resBolsillos.etiquetaBolsillo);
   }
 
   if (etiquetaPinza) {
@@ -2792,11 +4232,14 @@ export function construirMallaPrenda(
     etiquetas.push(cint.etiqueta);
   }
 
+  poblarCintasMetricas3D(perfil, config, ajusteStretch, grupoCintasMetricas, etiquetas);
   grupo.add(grupoCosturas);
+  grupo.add(grupoCintasMetricas);
 
   return {
     grupo,
     grupoCosturas,
+    grupoCintasMetricas,
     etiquetas,
     triangulosTotales,
   };
