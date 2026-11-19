@@ -332,12 +332,28 @@ export default function HomePage() {
     if (cfg.dressSubStyle) setDressSubStyle(cfg.dressSubStyle);
     if (cfg.twoPieceTopStyle) setTwoPieceTopStyle(cfg.twoPieceTopStyle);
     if (cfg.twoPieceBottomStyle) setTwoPieceBottomStyle(cfg.twoPieceBottomStyle);
+    if (cfg.jumpsuitSubStyle) setJumpsuitSubStyle(cfg.jumpsuitSubStyle);
+    if (cfg.kidsSubStyle) setKidsSubStyle(cfg.kidsSubStyle);
+    if (cfg.loungewearSubStyle) setLoungewearSubStyle(cfg.loungewearSubStyle);
+    if (cfg.accessorySubStyle) setAccessorySubStyle(cfg.accessorySubStyle);
     setNecklineStyle(cfg.necklineStyle);
     setSleeveStyle(cfg.sleeveStyle);
     setTorsoFit(cfg.torsoFit);
     setExtras(cfg.extras);
     setQuickLength(cfg.quickLength);
     setStyleVariant(cfg.styleVariant);
+    if (cfg.fabricType) setFabricType(cfg.fabricType);
+    if (cfg.apariencia3D) {
+      setUsuarioFijoTela3D(false);
+      setApariencia3D((prev) => ({
+        ...prev,
+        color: cfg.apariencia3D!.color,
+        tela: cfg.apariencia3D!.tela,
+        estampado: cfg.apariencia3D!.estampado,
+      }));
+    }
+    setPins(getDefaultPinsForCategory(cfg.category));
+    setPinsMoved(false);
     setActiveFashionStyleId(null);
     setActivePieceId("all");
   };

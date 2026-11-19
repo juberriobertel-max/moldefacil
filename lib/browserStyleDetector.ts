@@ -1,248 +1,232 @@
 import {
-  DEFAULT_GARMENT_EXTRAS,
-  DressSubStyle,
-  GarmentCategory,
-  GarmentExtras,
-  NecklineStyle,
-  PantsSubStyle,
-  QuickLengthPreset,
-  SkirtSubStyle,
-  SleeveStyle,
-  StyleVariant,
-  TopSubStyle,
-  TorsoFit,
-  TwoPieceBottomStyle,
-  TwoPieceTopStyle,
-} from "./types";
+  DominantColorResult,
+  extraerColorDominantePrenda,
+} from "./vision/colorExtractor";
+import {
+  preprocesarImagenPrenda,
+  VisionCropKey,
+} from "./vision/imagePreprocessor";
+import {
+  aplicarCorreccionUnToque,
+  aplicarReglasCoherenciaModisteria,
+  DetectedAttributeCandidate,
+  DetectedAttributeItem,
+  DetectedAttributeKey,
+  DetectedAttributeScores,
+  DetectedGarmentConfig,
+  RawVisionEvaluation,
+  TailoredVisionOutput,
+} from "./vision/tailoringRules";
+import {
+  CropRawInput,
+  ejecutarInferenciaEnCascada,
+  getCascadeEngineStatus,
+} from "./vision/cascadeRunner";
+import type {
+  WorkerRequestMessage,
+  WorkerResponseMessage,
+} from "../workers/garmentClassifier.worker";
 
-export interface DetectedGarmentConfig {
-  category: GarmentCategory;
-  topSubStyle?: TopSubStyle;
-  pantsSubStyle?: PantsSubStyle;
-  skirtSubStyle?: SkirtSubStyle;
-  dressSubStyle?: DressSubStyle;
-  twoPieceTopStyle?: TwoPieceTopStyle;
-  twoPieceBottomStyle?: TwoPieceBottomStyle;
-  necklineStyle: NecklineStyle;
-  sleeveStyle: SleeveStyle;
-  torsoFit: TorsoFit;
-  extras: GarmentExtras;
-  quickLength: QuickLengthPreset;
-  styleVariant: StyleVariant;
-}
-
-export interface DetectedAttributeScores {
-  category: { label: string; score: number };
-  sleeve: { label: string; score: number };
-  torsoFit: { label: string; score: number };
-  neckline: { label: string; score: number };
-  waistTieConfidence: number;
-  hemRuffleConfidence: number;
-}
+export type {
+  DetectedAttributeCandidate,
+  DetectedAttributeItem,
+  DetectedAttributeKey,
+  DetectedAttributeScores,
+  DetectedGarmentConfig,
+  TailoredVisionOutput,
+  DominantColorResult,
+};
+export { aplicarCorreccionUnToque };
 
 export type BrowserStyleDetectionResult =
-  | {
+  | ({
       status: "detected";
-      config: DetectedGarmentConfig;
-      scores: DetectedAttributeScores;
-    }
+    } & TailoredVisionOutput)
   | {
       status: "unavailable" | "timeout" | "error";
       reason: string;
     };
 
-type ZeroShotImageClassifier = (
-  images: HTMLCanvasElement | string,
-  candidate_labels: string[],
-  options?: { hypothesis_template?: string }
-) => Promise<Array<{ label: string; score: number }>>;
+let sharedWorker: Worker | null = null;
+let workerUnavailable = false;
+let nextRequestId = 1;
+let modelReadyState = false;
+let modelFailedState = false;
 
-const CATEGORY_PROMPTS: { id: GarmentCategory; prompt: string }[] = [
-  {
-    id: "dress",
-    prompt: "a full length or knee length one-piece dress",
-  },
-  {
-    id: "two_piece",
-    prompt:
-      "a two-piece outfit with a separate crop top and skirt or pants showing midriff",
-  },
-  {
-    id: "top",
-    prompt: "a standalone top, blouse, or shirt",
-  },
-  {
-    id: "skirt",
-    prompt: "a standalone skirt",
-  },
-  {
-    id: "pants",
-    prompt: "a pair of trousers, palazzo pants, or shorts",
-  },
-];
-
-const SLEEVE_PROMPTS: { id: SleeveStyle; prompt: string }[] = [
-  {
-    id: "kimono",
-    prompt:
-      "loose wide kimono sleeves, batwing dolman sleeves with dropped shoulder and no armhole seam, flowy wide cuffs",
-  },
-  {
-    id: "short",
-    prompt: "short fitted sleeves with a structured shoulder seam",
-  },
-  {
-    id: "long",
-    prompt: "long fitted sleeves with a structured shoulder seam",
-  },
-  {
-    id: "sleeveless",
-    prompt: "sleeveless garment, tank straps or bare shoulders",
-  },
-];
-
-const TORSO_FIT_PROMPTS: { id: TorsoFit; prompt: string }[] = [
-  {
-    id: "loose",
-    prompt:
-      "loose, flowy, bloused bodice with soft fabric folds and draped volume gathered at the waist",
-  },
-  {
-    id: "fitted",
-    prompt:
-      "tight, form-fitting, tailored bodice fitted closely to the waist and bust",
-  },
-];
-
-const NECKLINE_FRONT_PROMPTS: {
-  id: "cruzado" | "v_normal" | "redondo" | "cuadrado";
-  neckline: NecklineStyle;
-  wrapFront: boolean;
-  prompt: string;
-}[] = [
-  {
-    id: "cruzado",
-    neckline: "v_neck",
-    wrapFront: true,
-    prompt:
-      "surplice wrap dress front with deep crossover v-neckline overlapping diagonally",
-  },
-  {
-    id: "v_normal",
-    neckline: "v_neck",
-    wrapFront: false,
-    prompt: "symmetrical v-neck neckline without crossover wrap",
-  },
-  {
-    id: "redondo",
-    neckline: "round",
-    wrapFront: false,
-    prompt: "round crew neckline",
-  },
-  {
-    id: "cuadrado",
-    neckline: "square",
-    wrapFront: false,
-    prompt: "square or straight neckline",
-  },
-];
-
-const WAIST_TIE_PROMPT = "waist tie belt, fabric sash tied around the waist";
-const NO_WAIST_TIE_PROMPT = "no belt or waist tie";
-
-const HEM_RUFFLE_PROMPT = "tiered skirt with ruffled hem flounce";
-const NO_HEM_RUFFLE_PROMPT = "plain straight hem without ruffles";
-
-function loadImageIntoCanvas(imageDataUrl: string): Promise<HTMLCanvasElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      const maxDim = 384;
-      const scale = Math.min(
-        1,
-        maxDim / Math.max(img.width || 1, img.height || 1)
-      );
-      const w = Math.max(1, Math.round((img.width || maxDim) * scale));
-      const h = Math.max(1, Math.round((img.height || maxDim) * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        reject(new Error("Canvas 2D context unavailable"));
-        return;
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas);
-    };
-    img.onerror = () => reject(new Error("No se pudo decodificar la imagen"));
-    img.src = imageDataUrl;
-  });
+interface PendingWorkerTask {
+  resolve: (
+    value: Omit<RawVisionEvaluation, "colorDominante" | "cropTrimmedBars">
+  ) => void;
+  reject: (err: Error) => void;
+  onProgress?: (percent: number, stepLabel: string, modelId?: string) => void;
 }
 
-let cachedClassifierPromise: Promise<ZeroShotImageClassifier> | null = null;
+const pendingTasks = new Map<number, PendingWorkerTask>();
+const pendingWarmups = new Map<
+  number,
+  { resolve: () => void; reject: (err: Error) => void }
+>();
 
-async function getZeroShotClassifier(
-  onProgress?: (percent: number) => void
-): Promise<ZeroShotImageClassifier> {
-  if (!cachedClassifierPromise) {
-    cachedClassifierPromise = (async () => {
-      const { pipeline, env } = await import("@huggingface/transformers");
-      env.allowLocalModels = false;
-      env.allowRemoteModels = true;
-      env.useBrowserCache = true;
-      env.useWasmCache = true;
+function asegurarWorker(): Worker | null {
+  if (
+    typeof window === "undefined" ||
+    typeof Worker === "undefined" ||
+    workerUnavailable
+  ) {
+    return null;
+  }
+  if (sharedWorker) return sharedWorker;
 
-      const clf = await pipeline(
-        "zero-shot-image-classification",
-        "Xenova/clip-vit-base-patch32",
-        {
-          dtype: "q8",
-          progress_callback: (info: { status?: string; progress?: number }) => {
-            if (
-              onProgress &&
-              info.status === "progress" &&
-              typeof info.progress === "number"
-            ) {
-              onProgress(Math.round(info.progress));
-            }
-          },
+  try {
+    const worker = new Worker(
+      new URL("../workers/garmentClassifier.worker.ts", import.meta.url),
+      { type: "module" }
+    );
+
+    worker.addEventListener(
+      "message",
+      (ev: MessageEvent<WorkerResponseMessage>) => {
+        const msg = ev.data;
+        if (!msg) return;
+
+        if (msg.type === "progress") {
+          pendingTasks
+            .get(msg.requestId)
+            ?.onProgress?.(msg.percent, msg.stepLabel, msg.modelId);
+          return;
         }
+
+        if (msg.type === "warmup_done") {
+          modelReadyState = true;
+          modelFailedState = false;
+          const warm = pendingWarmups.get(msg.requestId);
+          if (warm) {
+            pendingWarmups.delete(msg.requestId);
+            warm.resolve();
+          }
+          return;
+        }
+
+        if (msg.type === "result") {
+          modelReadyState = true;
+          modelFailedState = false;
+          const task = pendingTasks.get(msg.requestId);
+          if (task) {
+            pendingTasks.delete(msg.requestId);
+            task.resolve(msg.payload);
+          }
+          return;
+        }
+
+        if (msg.type === "error") {
+          modelFailedState = true;
+          const task = pendingTasks.get(msg.requestId);
+          if (task) {
+            pendingTasks.delete(msg.requestId);
+            task.reject(new Error(msg.reason));
+          }
+          const warm = pendingWarmups.get(msg.requestId);
+          if (warm) {
+            pendingWarmups.delete(msg.requestId);
+            warm.reject(new Error(msg.reason));
+          }
+        }
+      }
+    );
+
+    worker.addEventListener("error", () => {
+      workerUnavailable = true;
+      sharedWorker = null;
+      const err = new Error(
+        "El Web Worker no pudo continuar; cambiando a hilo secundario"
       );
-      return clf as unknown as ZeroShotImageClassifier;
-    })().catch((err) => {
-      cachedClassifierPromise = null;
-      throw err;
+      for (const [, task] of pendingTasks) {
+        task.reject(err);
+      }
+      pendingTasks.clear();
+      for (const [, warm] of pendingWarmups) {
+        warm.reject(err);
+      }
+      pendingWarmups.clear();
     });
+
+    sharedWorker = worker;
+    return sharedWorker;
+  } catch {
+    workerUnavailable = true;
+    return null;
   }
-  return cachedClassifierPromise;
 }
 
-function pickTop<T extends { prompt: string }>(
-  items: T[],
-  results: Array<{ label: string; score: number }>
-): { item: T; score: number } {
-  const byPrompt = new Map(items.map((x) => [x.prompt, x]));
-  const sorted = [...results].sort((a, b) => b.score - a.score);
-  for (const r of sorted) {
-    const found = byPrompt.get(r.label);
-    if (found) return { item: found, score: Number(r.score) };
-  }
-  return { item: items[0], score: 0 };
+export function isModelReady(): boolean {
+  return modelReadyState || getCascadeEngineStatus().ready;
+}
+
+export function isModelFailed(): boolean {
+  return modelFailedState || getCascadeEngineStatus().failed;
 }
 
 /**
- * Runs 100% client-side multi-attribute zero-shot classification in the browser
- * using Xenova/clip-vit-base-patch32. Evaluates 5 independent garment dimensions:
- * 1) Base category, 2) Shoulder & sleeve construction (kimono vs. set-in),
- * 3) Torso looseness/blousing, 4) Neckline & crossover wrap, 5) Waist tie & ruffle extras.
+ * Precarga el modelo cuantizado SigLIP / CLIP en segundo plano sin bloquear la UI.
+ */
+export function warmUpBrowserDetector(): void {
+  const worker = asegurarWorker();
+  if (!worker) return;
+  const requestId = nextRequestId++;
+  const req: WorkerRequestMessage = { type: "warmup", requestId };
+  pendingWarmups.set(requestId, {
+    resolve: () => undefined,
+    reject: () => undefined,
+  });
+  worker.postMessage(req);
+}
+
+function ejecutarEnWorkerOProceso(
+  crops: Record<VisionCropKey, CropRawInput>,
+  onProgress?: (percent: number, stepLabel: string, modelId?: string) => void
+): Promise<Omit<RawVisionEvaluation, "colorDominante" | "cropTrimmedBars">> {
+  const worker = asegurarWorker();
+  if (!worker) {
+    return ejecutarInferenciaEnCascada(crops, onProgress);
+  }
+
+  return new Promise<
+    Omit<RawVisionEvaluation, "colorDominante" | "cropTrimmedBars">
+  >((resolve, reject) => {
+    const requestId = nextRequestId++;
+    pendingTasks.set(requestId, { resolve, reject, onProgress });
+    const req: WorkerRequestMessage = {
+      type: "classify",
+      requestId,
+      crops,
+    };
+    try {
+      worker.postMessage(req);
+    } catch {
+      pendingTasks.delete(requestId);
+      workerUnavailable = true;
+      void ejecutarInferenciaEnCascada(crops, onProgress).then(resolve, reject);
+    }
+  }).catch((err) => {
+    if (workerUnavailable) {
+      return ejecutarInferenciaEnCascada(crops, onProgress);
+    }
+    throw err;
+  });
+}
+
+/**
+ * Analiza una foto o captura de prenda 100% en el navegador (cero APIs externas):
+ * 1. Auto-recorta franjas sólidas de captura y genera 4 vistas Multi-Crop (224x224).
+ * 2. Extrae el color dominante descartando piel y fondo.
+ * 3. Ejecuta clasificación zero-shot SigLIP q8 (con fallback CLIP q8) en Web Worker.
+ * 4. Aplica reglas deterministas de coherencia de modistería.
  */
 export async function detectFashionStyleInBrowser(
   imageDataUrl: string,
   options?: {
     timeoutMs?: number;
-    onProgress?: (percent: number) => void;
+    onProgress?: (percent: number, stepLabel?: string) => void;
   }
 ): Promise<BrowserStyleDetectionResult> {
   if (typeof window === "undefined") {
@@ -256,119 +240,60 @@ export async function detectFashionStyleInBrowser(
     };
   }
 
-  const timeoutMs = options?.timeoutMs ?? 60000;
+  const timeoutMs = options?.timeoutMs ?? 90000;
   let timerId: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    const inferencePromise = (async (): Promise<BrowserStyleDetectionResult> => {
-      const [classifier, canvas] = await Promise.all([
-        getZeroShotClassifier(options?.onProgress),
-        loadImageIntoCanvas(imageDataUrl),
-      ]);
+    const pipelinePromise = (async (): Promise<BrowserStyleDetectionResult> => {
+      options?.onProgress?.(6, "Recortando prenda y preparando vistas...");
+      const prep = await preprocesarImagenPrenda(imageDataUrl);
 
-      const opts = { hypothesis_template: "a fashion photo of {}" };
-
-      // 1. Base Category
-      const catOut = await classifier(
-        canvas,
-        CATEGORY_PROMPTS.map((c) => c.prompt),
-        opts
+      options?.onProgress?.(10, "Extrayendo color dominante de la tela...");
+      const colorDominante = extraerColorDominantePrenda(
+        prep.centralPixels,
+        prep.centralWidth,
+        prep.centralHeight
       );
-      const bestCat = pickTop(CATEGORY_PROMPTS, catOut);
 
-      // 2. Shoulder & Sleeve Construction
-      const sleeveOut = await classifier(
-        canvas,
-        SLEEVE_PROMPTS.map((s) => s.prompt),
-        opts
-      );
-      const bestSleeve = pickTop(SLEEVE_PROMPTS, sleeveOut);
-
-      // 3. Torso Fit & Looseness
-      const fitOut = await classifier(
-        canvas,
-        TORSO_FIT_PROMPTS.map((f) => f.prompt),
-        opts
-      );
-      const bestFit = pickTop(TORSO_FIT_PROMPTS, fitOut);
-
-      // 4. Neckline & Crossover Wrap
-      const neckOut = await classifier(
-        canvas,
-        NECKLINE_FRONT_PROMPTS.map((n) => n.prompt),
-        opts
-      );
-      const bestNeck = pickTop(NECKLINE_FRONT_PROMPTS, neckOut);
-
-      // 5a. Waist Tie / Belt (> 60% confidence vs. opposite)
-      const tieOut = await classifier(
-        canvas,
-        [WAIST_TIE_PROMPT, NO_WAIST_TIE_PROMPT],
-        opts
-      );
-      const waistTieConfidence =
-        tieOut.find((r) => r.label === WAIST_TIE_PROMPT)?.score ?? 0;
-
-      // 5b. Ruffled Hem / Bolero (> 60% confidence vs. opposite)
-      const ruffleOut = await classifier(
-        canvas,
-        [HEM_RUFFLE_PROMPT, NO_HEM_RUFFLE_PROMPT],
-        opts
-      );
-      const hemRuffleConfidence =
-        ruffleOut.find((r) => r.label === HEM_RUFFLE_PROMPT)?.score ?? 0;
-
-      const hasUpperBodice =
-        bestCat.item.id === "dress" ||
-        bestCat.item.id === "top" ||
-        bestCat.item.id === "two_piece";
-
-      const extras: GarmentExtras = {
-        ...DEFAULT_GARMENT_EXTRAS,
-        wrapFront: hasUpperBodice ? bestNeck.item.wrapFront : false,
-        waistTie: waistTieConfidence > 0.6,
-        hemRuffle: bestCat.item.id !== "pants" && hemRuffleConfidence > 0.6,
+      const cropInputs: Record<VisionCropKey, CropRawInput> = {
+        full: {
+          width: prep.crops.full.width,
+          height: prep.crops.full.height,
+          rgba: prep.crops.full.rgba,
+        },
+        neckline: {
+          width: prep.crops.neckline.width,
+          height: prep.crops.neckline.height,
+          rgba: prep.crops.neckline.rgba,
+        },
+        sleeves: {
+          width: prep.crops.sleeves.width,
+          height: prep.crops.sleeves.height,
+          rgba: prep.crops.sleeves.rgba,
+        },
+        waistLower: {
+          width: prep.crops.waistLower.width,
+          height: prep.crops.waistLower.height,
+          rgba: prep.crops.waistLower.rgba,
+        },
       };
 
-      const config: DetectedGarmentConfig = {
-        category: bestCat.item.id,
-        topSubStyle: bestCat.item.id === "top" ? "blouse" : undefined,
-        pantsSubStyle: bestCat.item.id === "pants" ? "wide" : undefined,
-        skirtSubStyle:
-          bestCat.item.id === "skirt" || bestCat.item.id === "dress"
-            ? "a_line"
-            : undefined,
-        dressSubStyle: bestCat.item.id === "dress" ? "dress" : undefined,
-        twoPieceTopStyle:
-          bestCat.item.id === "two_piece"
-            ? bestFit.item.id === "loose"
-              ? "waist_blouse"
-              : "crop_top"
-            : undefined,
-        twoPieceBottomStyle:
-          bestCat.item.id === "two_piece" ? "aline_skirt" : undefined,
-        necklineStyle: bestNeck.item.neckline,
-        sleeveStyle: bestSleeve.item.id,
-        torsoFit: bestFit.item.id,
-        extras,
-        quickLength:
-          bestCat.item.id === "dress" || bestCat.item.id === "skirt"
-            ? "midi"
-            : "photo",
-        styleVariant: "default",
-      };
+      const rawEval = await ejecutarEnWorkerOProceso(
+        cropInputs,
+        (pct, label) => options?.onProgress?.(pct, label)
+      );
+
+      options?.onProgress?.(100, "Aplicando reglas de modistería...");
+
+      const tailored = aplicarReglasCoherenciaModisteria({
+        ...rawEval,
+        colorDominante,
+        cropTrimmedBars: prep.trim.barDetected,
+      });
 
       return {
         status: "detected",
-        config,
-        scores: {
-          category: { label: bestCat.item.id, score: bestCat.score },
-          sleeve: { label: bestSleeve.item.id, score: bestSleeve.score },
-          torsoFit: { label: bestFit.item.id, score: bestFit.score },
-          neckline: { label: bestNeck.item.id, score: bestNeck.score },
-          waistTieConfidence: Number(waistTieConfidence),
-          hemRuffleConfidence: Number(hemRuffleConfidence),
-        },
+        ...tailored,
       };
     })();
 
@@ -384,7 +309,7 @@ export async function detectFashionStyleInBrowser(
       }
     );
 
-    return await Promise.race([inferencePromise, timeoutPromise]);
+    return await Promise.race([pipelinePromise, timeoutPromise]);
   } catch (err) {
     return {
       status: "error",

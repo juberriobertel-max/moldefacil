@@ -1,9 +1,19 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { Upload, Camera, RotateCcw, Sparkles, Loader2, Crop } from "lucide-react";
+import {
+  Upload,
+  Camera,
+  RotateCcw,
+  Sparkles,
+  Loader2,
+  Crop,
+  AlertTriangle,
+  Palette,
+} from "lucide-react";
 import {
   AccessorySubStyle,
+  DEFAULT_GARMENT_EXTRAS,
   GarmentCategory,
   GarmentExtras,
   JumpsuitSubStyle,
@@ -22,9 +32,15 @@ import {
 } from "@/lib/types";
 import { getDefaultPinsForCategory } from "@/lib/proportionSolver";
 import {
+  aplicarCorreccionUnToque,
+  BrowserStyleDetectionResult,
+  DetectedAttributeKey,
   DetectedGarmentConfig,
   detectFashionStyleInBrowser,
+  warmUpBrowserDetector,
 } from "@/lib/browserStyleDetector";
+import { extraerColorDominantePrenda } from "@/lib/vision/colorExtractor";
+import { preprocesarImagenPrenda } from "@/lib/vision/imagePreprocessor";
 import {
   GarmentExtrasSelector,
   NecklineCollarSelector,
@@ -234,7 +250,72 @@ function createSamplePhoto(
   return canvas.toDataURL("image/png");
 }
 
-/* ---------- Minimalist Schematic SVG Icons for Part Cards ---------- */
+type DetectedVisionState = Extract<
+  BrowserStyleDetectionResult,
+  { status: "detected" }
+>;
+
+type ScannerDetectionState =
+  | { status: "idle" }
+  | { status: "analyzing"; progress?: number; stepLabel?: string }
+  | { status: "detected"; result: DetectedVisionState; isSample?: boolean }
+  | { status: "fallback"; reason: string };
+
+const SAMPLE_CONFIG_MAP: Record<
+  "dress" | "pants" | "blouse" | "two_piece",
+  DetectedGarmentConfig
+> = {
+  dress: {
+    category: "dress",
+    dressSubStyle: "dress",
+    skirtSubStyle: "a_line",
+    necklineStyle: "round",
+    sleeveStyle: "short",
+    torsoFit: "fitted",
+    extras: { ...DEFAULT_GARMENT_EXTRAS },
+    quickLength: "midi",
+    styleVariant: "default",
+    fabricType: "woven",
+    apariencia3D: { color: "#E11D48", tela: "crepe", estampado: "liso" },
+  },
+  two_piece: {
+    category: "two_piece",
+    twoPieceTopStyle: "crop_top",
+    twoPieceBottomStyle: "aline_skirt",
+    necklineStyle: "round",
+    sleeveStyle: "short",
+    torsoFit: "fitted",
+    extras: { ...DEFAULT_GARMENT_EXTRAS },
+    quickLength: "midi",
+    styleVariant: "default",
+    fabricType: "woven",
+    apariencia3D: { color: "#E11D48", tela: "crepe", estampado: "liso" },
+  },
+  pants: {
+    category: "pants",
+    pantsSubStyle: "wide",
+    necklineStyle: "round",
+    sleeveStyle: "sleeveless",
+    torsoFit: "fitted",
+    extras: { ...DEFAULT_GARMENT_EXTRAS },
+    quickLength: "photo",
+    styleVariant: "default",
+    fabricType: "woven",
+    apariencia3D: { color: "#0F766E", tela: "lino", estampado: "liso" },
+  },
+  blouse: {
+    category: "top",
+    topSubStyle: "blouse",
+    necklineStyle: "round",
+    sleeveStyle: "kimono",
+    torsoFit: "loose",
+    extras: { ...DEFAULT_GARMENT_EXTRAS },
+    quickLength: "photo",
+    styleVariant: "default",
+    fabricType: "woven",
+    apariencia3D: { color: "#1E293B", tela: "seda", estampado: "liso" },
+  },
+};
 function GarmentIcon({ type }: { type: GarmentCategory | "jacket" }) {
   if (type === "jacket") {
     return (
@@ -401,12 +482,9 @@ export default function SmartGarmentScanner({
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [draggingPin, setDraggingPin] = useState<PinKey | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [detectionState, setDetectionState] = useState<
-    | { status: "idle" }
-    | { status: "analyzing"; progress?: number }
-    | { status: "detected" }
-    | { status: "fallback"; reason: string }
-  >({ status: "idle" });
+  const [detectionState, setDetectionState] = useState<ScannerDetectionState>({
+    status: "idle",
+  });
 
   const innerFrameRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -421,64 +499,21 @@ export default function SmartGarmentScanner({
     category === "two_piece" ||
     (category === "jumpsuit" && jumpsuitSubStyle !== "overall");
 
-  const detectedBadges = (() => {
-    const badges: string[] = [];
-    const catLabels: Record<GarmentCategory, string> = {
-      dress: "Vestido",
-      two_piece: "Conjunto 2 Piezas",
-      top: topSubStyle === "jacket" ? "Chaqueta / Blazer" : "Blusa / Camisa",
-      skirt: "Falda",
-      pants: "Pantalón",
-      jumpsuit: "Enterizo / Overol",
-      kids: "Ropa Infantil / Bebé",
-      loungewear: "Deportivo / Pijama",
-      accessories: "Accesorios",
-    };
-    badges.push(catLabels[category]);
-
-    if (hasUpperBodyControls) {
-      if (extras.wrapFront) {
-        badges.push("Frente Cruzado");
-      } else {
-        const nkMap: Record<NecklineStyle, string> = {
-          v_neck: "Escote en V",
-          round: "Escote Redondo",
-          square: "Escote Cuadrado",
-          high: "Cuello Alto",
-          tailored_lapel: "Solapa Sastre",
-          shirt_collar: "Cuello Camisero",
-        };
-        badges.push(nkMap[necklineStyle]);
-      }
-
-      const slMap: Record<SleeveStyle, string> = {
-        kimono: "Manga Kimono",
-        short: "Manga Corta",
-        long: "Manga Larga",
-        sleeveless: "Sin Mangas",
-      };
-      badges.push(slMap[sleeveStyle]);
-
-      badges.push(
-        torsoFit === "loose" ? "Torso Holgado" : "Torso Entallado"
-      );
-    }
-
-    if (extras.waistTie) badges.push("Con Cinturón");
-    if (extras.hemRuffle) badges.push("Con Bolero / Volante");
-    if (extras.flaredSleeve) badges.push("Manga Acampanada");
-    if (extras.sidePockets) badges.push("Con Bolsillos");
-    if (extras.flapPockets) badges.push("Bolsillos con Solapa");
-    return badges;
-  })();
-
   const runStyleDetection = async (dataUrl: string) => {
     const seq = ++analysisSeqRef.current;
-    setDetectionState({ status: "analyzing" });
+    setDetectionState({
+      status: "analyzing",
+      progress: 4,
+      stepLabel: "Recortando prenda...",
+    });
     const res = await detectFashionStyleInBrowser(dataUrl, {
-      onProgress: (pct) => {
+      onProgress: (pct, stepLabel) => {
         if (analysisSeqRef.current === seq) {
-          setDetectionState({ status: "analyzing", progress: pct });
+          setDetectionState({
+            status: "analyzing",
+            progress: pct,
+            stepLabel: stepLabel ?? "Analizando prenda...",
+          });
         }
       },
     });
@@ -486,14 +521,187 @@ export default function SmartGarmentScanner({
 
     if (res.status === "detected") {
       onApplyDetectedAttributes(res.config);
-      setDetectionState({ status: "detected" });
+      setDetectionState({ status: "detected", result: res });
     } else {
       setDetectionState({ status: "fallback", reason: res.reason });
     }
   };
 
+  const handleSamplePreset = async (
+    kind: "dress" | "pants" | "blouse" | "two_piece"
+  ) => {
+    const sample = createSamplePhoto(kind);
+    const seq = ++analysisSeqRef.current;
+    setRawUploadSrc(sample);
+    setImageSrc(sample);
+    const baseCfg = {
+      ...SAMPLE_CONFIG_MAP[kind],
+      extras: { ...SAMPLE_CONFIG_MAP[kind].extras },
+      apariencia3D: SAMPLE_CONFIG_MAP[kind].apariencia3D
+        ? { ...SAMPLE_CONFIG_MAP[kind].apariencia3D }
+        : undefined,
+    };
+    onApplyDetectedAttributes(baseCfg);
+
+    try {
+      const prep = await preprocesarImagenPrenda(sample);
+      if (analysisSeqRef.current !== seq) return;
+      const colorDominante = extraerColorDominantePrenda(
+        prep.centralPixels,
+        prep.centralWidth,
+        prep.centralHeight
+      );
+      const updatedCfg: DetectedGarmentConfig = {
+        ...baseCfg,
+        apariencia3D: {
+          color: colorDominante.hexDetectado,
+          tela: baseCfg.apariencia3D?.tela ?? "crepe",
+          estampado: "liso",
+        },
+      };
+      onApplyDetectedAttributes(updatedCfg);
+
+      const sampleLabelMap: Record<typeof kind, string> = {
+        dress: "Vestido",
+        two_piece: "Conjunto 2 Piezas",
+        pants: "Pantalón",
+        blouse: "Blusa / Camisa",
+      };
+
+      const sampleResult: DetectedVisionState = {
+        status: "detected",
+        config: updatedCfg,
+        scores: {
+          category: { label: kind, score: 0.92 },
+          sleeve: { label: updatedCfg.sleeveStyle, score: 0.78 },
+          torsoFit: { label: updatedCfg.torsoFit, score: 0.72 },
+          neckline: { label: updatedCfg.necklineStyle, score: 0.54 },
+          waistTieConfidence: 0.15,
+          hemRuffleConfidence: 0.12,
+        },
+        atributosConConfianza: [
+          {
+            key: "category",
+            titleEs: "Prenda",
+            selectedId:
+              kind === "dress"
+                ? "vestido"
+                : kind === "two_piece"
+                  ? "conjunto"
+                  : kind === "pants"
+                    ? "pantalon"
+                    : "blusa",
+            selectedLabel: sampleLabelMap[kind],
+            confidence: 0.92,
+            esAltaConfianza: true,
+            top2Opciones: null,
+          },
+          ...(kind !== "pants"
+            ? [
+                {
+                  key: "neckline" as DetectedAttributeKey,
+                  titleEs: "Escote",
+                  selectedId: "round",
+                  selectedLabel: "Escote Redondo",
+                  confidence: 0.54,
+                  esAltaConfianza: false,
+                  top2Opciones: [
+                    { id: "round", label: "Escote Redondo", confidence: 0.54 },
+                    { id: "v_neck", label: "Escote en V", confidence: 0.42 },
+                  ] as [
+                    { id: string; label: string; confidence: number },
+                    { id: string; label: string; confidence: number },
+                  ],
+                },
+                {
+                  key: "sleeve" as DetectedAttributeKey,
+                  titleEs: "Mangas",
+                  selectedId: updatedCfg.sleeveStyle,
+                  selectedLabel:
+                    updatedCfg.sleeveStyle === "kimono"
+                      ? "Manga Kimono"
+                      : "Manga Corta",
+                  confidence: 0.78,
+                  esAltaConfianza: true,
+                  top2Opciones: null,
+                },
+              ]
+            : [
+                {
+                  key: "pantsCut" as DetectedAttributeKey,
+                  titleEs: "Corte Pantalón",
+                  selectedId: "wide",
+                  selectedLabel: "Pantalón Palazzo / Ancho",
+                  confidence: 0.56,
+                  esAltaConfianza: false,
+                  top2Opciones: [
+                    {
+                      id: "wide",
+                      label: "Palazzo / Ancho",
+                      confidence: 0.56,
+                    },
+                    { id: "straight", label: "Recto Clásico", confidence: 0.44 },
+                  ] as [
+                    { id: string; label: string; confidence: number },
+                    { id: string; label: string; confidence: number },
+                  ],
+                },
+              ]),
+          {
+            key: "fabric",
+            titleEs: "Tela",
+            selectedId: updatedCfg.apariencia3D?.tela ?? "crepe",
+            selectedLabel:
+              updatedCfg.apariencia3D?.tela === "lino"
+                ? "Lino / Algodón"
+                : updatedCfg.apariencia3D?.tela === "seda"
+                  ? "Seda / Satín"
+                  : "Crepé Fluido",
+            confidence: 0.81,
+            esAltaConfianza: true,
+            top2Opciones: null,
+          },
+        ],
+        colorDominante,
+        esPrendaValida: true,
+        reglasAplicadas: [],
+        modelId: "preset+colorExtractor",
+        backend: "wasm",
+        cropTrimmedBars: false,
+      };
+      setDetectionState({ status: "detected", result: sampleResult, isSample: true });
+    } catch {
+      setDetectionState({ status: "idle" });
+    }
+  };
+
+  const handleOneTapCorrection = (
+    key: DetectedAttributeKey,
+    optionId: string,
+    optionLabel: string
+  ) => {
+    if (detectionState.status !== "detected") return;
+    const updated = aplicarCorreccionUnToque(
+      detectionState.result,
+      key,
+      optionId,
+      optionLabel
+    );
+    const synced: DetectedVisionState = {
+      status: "detected",
+      ...updated,
+    };
+    setDetectionState({
+      status: "detected",
+      result: synced,
+      isSample: detectionState.isSample,
+    });
+    onApplyDetectedAttributes(synced.config);
+  };
+
   const handleFile = (file: File) => {
     if (!file.type.match(/^image\/(jpeg|png|webp)$/)) return;
+    warmUpBrowserDetector();
     const reader = new FileReader();
     reader.onload = (e) => {
       if (typeof e.target?.result === "string") {
@@ -579,48 +787,28 @@ export default function SmartGarmentScanner({
           <div className="flex flex-wrap justify-center gap-2">
             <button
               type="button"
-              onClick={() => {
-                const sample = createSamplePhoto("two_piece");
-                setRawUploadSrc(sample);
-                setImageSrc(sample);
-                onCategoryChange("two_piece");
-              }}
+              onClick={() => void handleSamplePreset("two_piece")}
               className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 border border-slate-200 shadow-2xs cursor-pointer"
             >
               Conjunto (2 Piezas)
             </button>
             <button
               type="button"
-              onClick={() => {
-                const sample = createSamplePhoto("dress");
-                setRawUploadSrc(sample);
-                setImageSrc(sample);
-                onCategoryChange("dress");
-              }}
+              onClick={() => void handleSamplePreset("dress")}
               className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 border border-slate-200 shadow-2xs cursor-pointer"
             >
               Vestido
             </button>
             <button
               type="button"
-              onClick={() => {
-                const sample = createSamplePhoto("pants");
-                setRawUploadSrc(sample);
-                setImageSrc(sample);
-                onCategoryChange("pants");
-              }}
+              onClick={() => void handleSamplePreset("pants")}
               className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 border border-slate-200 shadow-2xs cursor-pointer"
             >
               Pantalón
             </button>
             <button
               type="button"
-              onClick={() => {
-                const sample = createSamplePhoto("blouse");
-                setRawUploadSrc(sample);
-                setImageSrc(sample);
-                onCategoryChange("top");
-              }}
+              onClick={() => void handleSamplePreset("blouse")}
               className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 border border-slate-200 shadow-2xs cursor-pointer"
             >
               Blusa
@@ -641,23 +829,43 @@ export default function SmartGarmentScanner({
       ) : (
         <div className="space-y-3">
           {detectionState.status === "analyzing" && (
-            <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-900 flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
-              <span>
-                Analizando prenda, mangas, caída y detalles en tu navegador...
+            <div
+              data-testid="analyzing-progress-banner"
+              className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-900 space-y-1.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                  <span className="font-medium truncate">
+                    {detectionState.stepLabel ||
+                      "Analizando prenda, mangas, caída y detalles..."}
+                  </span>
+                </div>
                 {typeof detectionState.progress === "number" &&
-                detectionState.progress > 0 &&
-                detectionState.progress < 100
-                  ? ` (${detectionState.progress}%)`
-                  : ""}
-              </span>
+                  detectionState.progress > 0 && (
+                    <span className="text-xs font-extrabold tabular-nums text-amber-700 shrink-0">
+                      {Math.min(100, detectionState.progress)}%
+                    </span>
+                  )}
+              </div>
+              {typeof detectionState.progress === "number" && (
+                <div className="w-full h-1.5 rounded-full bg-amber-200/70 overflow-hidden">
+                  <div
+                    className="h-full bg-amber-600 transition-all duration-300"
+                    style={{
+                      width: `${Math.min(100, Math.max(6, detectionState.progress))}%`,
+                    }}
+                  />
+                </div>
+              )}
             </div>
           )}
 
           {detectionState.status === "fallback" && (
             <div className="rounded-xl bg-slate-100 border border-slate-200 px-3 py-2 text-xs text-slate-600">
-              Análisis automático no disponible en este momento; elige la prenda
-              y sus partes manualmente abajo.
+              Análisis automático no disponible en este momento (
+              {detectionState.reason}); elige la prenda y sus partes manualmente
+              abajo.
             </div>
           )}
 
@@ -831,26 +1039,152 @@ export default function SmartGarmentScanner({
           </div>
 
           {detectionState.status === "detected" && (
-            <div
-              data-testid="detected-attributes-card"
-              className="rounded-2xl bg-emerald-50 border border-emerald-200 p-3.5 space-y-2.5"
-            >
-              <div className="flex items-start gap-2 text-sm text-emerald-950 font-medium leading-snug">
-                <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>
-                  Esto es lo que detectamos en tu foto. Toca cualquier botón
-                  abajo si quieres cambiar algo
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {detectedBadges.map((badge) => (
-                  <span
-                    key={badge}
-                    className="inline-flex items-center px-2.5 py-1 rounded-full bg-white border border-emerald-300 text-xs font-bold text-emerald-900 shadow-2xs"
-                  >
-                    ✓ {badge}
-                  </span>
-                ))}
+            <div className="space-y-2.5">
+              {!detectionState.result.esPrendaValida && (
+                <div
+                  data-testid="low-validity-warning"
+                  className="rounded-2xl bg-amber-50 border border-amber-300 p-3 flex items-start gap-2.5 text-xs sm:text-sm text-amber-950"
+                >
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-bold">Foto poco clara para ropa</p>
+                    <p className="text-amber-900/90 leading-snug">
+                      {detectionState.result.avisoBajaValidez}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div
+                data-testid="detected-attributes-card"
+                className="rounded-2xl bg-[#FAF6F0] border border-[#3B7A57]/35 p-3.5 space-y-3"
+              >
+                <div className="flex items-start justify-between gap-2 text-xs sm:text-sm text-slate-800 font-semibold leading-snug">
+                  <div className="flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-[#3B7A57] shrink-0 mt-0.5" />
+                    <div>
+                      <span>
+                        Detección visual lista en molde 2D y probador 3D
+                      </span>
+                      {detectionState.result.cropTrimmedBars && (
+                        <p className="text-[11px] font-medium text-[#3B7A57]">
+                          Bordes de captura recortados automáticamente
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {detectionState.isSample && imageSrc && (
+                    <button
+                      type="button"
+                      onClick={() => void runStyleDetection(imageSrc)}
+                      className="text-[11px] font-bold text-teal-700 hover:text-teal-900 underline shrink-0 cursor-pointer"
+                    >
+                      Analizar con IA
+                    </button>
+                  )}
+                </div>
+
+                {/* Color dominante extraído automáticamente */}
+                <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-white border border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-5 h-5 rounded-full border border-slate-300 shadow-2xs shrink-0"
+                      style={{
+                        backgroundColor:
+                          detectionState.result.colorDominante.hexDetectado,
+                      }}
+                    />
+                    <div className="text-xs leading-tight">
+                      <span className="font-bold text-slate-800">
+                        Color detectado:{" "}
+                      </span>
+                      <span className="font-semibold text-slate-700">
+                        {detectionState.result.colorDominante.colorTallerNombre}
+                      </span>{" "}
+                      <span className="text-[11px] text-slate-500 font-mono">
+                        ({detectionState.result.colorDominante.hexDetectado})
+                      </span>
+                    </div>
+                  </div>
+                  <Palette className="w-4 h-4 text-slate-400 shrink-0" />
+                </div>
+
+                {/* Etiquetas verde salvia de alta confianza (>= 60%) */}
+                <div className="flex flex-wrap gap-1.5">
+                  {detectionState.result.atributosConConfianza
+                    .filter((attr) => attr.esAltaConfianza)
+                    .map((attr) => (
+                      <span
+                        key={attr.key}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#EDF6F0] border border-[#3B7A57]/45 text-xs font-bold text-[#22543D] shadow-2xs"
+                        title={
+                          attr.reglaAplicada ||
+                          `${attr.titleEs}: ${Math.round(attr.confidence * 100)}%`
+                        }
+                      >
+                        ✓ {attr.selectedLabel}
+                        {attr.confidence < 1 && (
+                          <span className="text-[10px] font-semibold opacity-75">
+                            {Math.round(attr.confidence * 100)}%
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                </div>
+
+                {/* Chips interactivos de 1 toque para atributos con confianza media (< 60%) */}
+                {detectionState.result.atributosConConfianza.some(
+                  (attr) => !attr.esAltaConfianza && attr.top2Opciones
+                ) && (
+                  <div className="space-y-2 pt-1 border-t border-slate-200/80">
+                    <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                      Confirma en 1 toque (duda visual &lt; 60%):
+                    </p>
+                    <div className="space-y-1.5">
+                      {detectionState.result.atributosConConfianza
+                        .filter(
+                          (attr) => !attr.esAltaConfianza && attr.top2Opciones
+                        )
+                        .map((attr) => (
+                          <div
+                            key={attr.key}
+                            data-testid={`one-tap-chip-${attr.key}`}
+                            className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-amber-50/80 border border-amber-200"
+                          >
+                            <span className="text-xs font-bold text-amber-950">
+                              {attr.titleEs}: ¿Cuál se acerca más?
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {attr.top2Opciones!.map((opt) => {
+                                const isActive = attr.selectedId === opt.id;
+                                return (
+                                  <button
+                                    key={opt.id}
+                                    type="button"
+                                    onClick={() =>
+                                      handleOneTapCorrection(
+                                        attr.key,
+                                        opt.id,
+                                        opt.label
+                                      )
+                                    }
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                                      isActive
+                                        ? "bg-[#3B7A57] text-white border-[#3B7A57]"
+                                        : "bg-white text-slate-700 border-slate-300 hover:border-amber-500"
+                                    }`}
+                                  >
+                                    {opt.label} ({Math.round(opt.confidence * 100)}
+                                    %)
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
