@@ -48,10 +48,15 @@ export interface PreprocessedGarmentImage {
   centralPixels: Uint8ClampedArray;
   centralWidth: number;
   centralHeight: number;
+  silhouettePixels: Uint8ClampedArray;
+  silhouetteWidth: number;
+  silhouetteHeight: number;
 }
 
 const TARGET_CROP_SIZE = 224;
 const CENTRAL_COLOR_SAMPLE_SIZE = 64;
+const SILHOUETTE_SAMPLE_W = 120;
+const SILHOUETTE_SAMPLE_H = 160;
 const MAX_WORKING_DIMENSION = 768;
 
 /**
@@ -441,6 +446,32 @@ export async function preprocesarImagenPrenda(
     CENTRAL_COLOR_SAMPLE_SIZE
   ).data;
 
+  // Extraer mapa de silueta completo (120x160) para auto-colocar los pines 2D
+  const silCanvas = document.createElement("canvas");
+  silCanvas.width = SILHOUETTE_SAMPLE_W;
+  silCanvas.height = SILHOUETTE_SAMPLE_H;
+  const silCtx = silCanvas.getContext("2d", { willReadFrequently: true });
+  if (!silCtx) {
+    throw new Error("Contexto 2D no disponible para análisis de silueta");
+  }
+  silCtx.drawImage(
+    cleanCanvas,
+    0,
+    0,
+    trim.trimmedWidth,
+    trim.trimmedHeight,
+    0,
+    0,
+    SILHOUETTE_SAMPLE_W,
+    SILHOUETTE_SAMPLE_H
+  );
+  const silhouettePixels = silCtx.getImageData(
+    0,
+    0,
+    SILHOUETTE_SAMPLE_W,
+    SILHOUETTE_SAMPLE_H
+  ).data;
+
   return {
     sourceWidth: rawCanvas.width,
     sourceHeight: rawCanvas.height,
@@ -449,5 +480,8 @@ export async function preprocesarImagenPrenda(
     centralPixels,
     centralWidth: CENTRAL_COLOR_SAMPLE_SIZE,
     centralHeight: CENTRAL_COLOR_SAMPLE_SIZE,
+    silhouettePixels,
+    silhouetteWidth: SILHOUETTE_SAMPLE_W,
+    silhouetteHeight: SILHOUETTE_SAMPLE_H,
   };
 }

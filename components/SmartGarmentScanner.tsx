@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Upload,
   Camera,
@@ -41,6 +41,7 @@ import {
 } from "@/lib/browserStyleDetector";
 import { extraerColorDominantePrenda } from "@/lib/vision/colorExtractor";
 import { preprocesarImagenPrenda } from "@/lib/vision/imagePreprocessor";
+import { calcularPinesAutomaticosPorCategoria } from "@/lib/vision/pinAutoPlacer";
 import {
   GarmentExtrasSelector,
   NecklineCollarSelector,
@@ -485,10 +486,19 @@ export default function SmartGarmentScanner({
   const [detectionState, setDetectionState] = useState<ScannerDetectionState>({
     status: "idle",
   });
+  const [autoPinsMap, setAutoPinsMap] = useState<Record<
+    GarmentCategory,
+    TracingPins
+  > | null>(null);
 
   const innerFrameRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const analysisSeqRef = useRef(0);
+  const activeCategoryRef = useRef(category);
+
+  useEffect(() => {
+    activeCategoryRef.current = category;
+  }, [category]);
 
   const isTwoPiece = category === "two_piece";
   const activePins = getPinsForCategory(category, loungewearSubStyle);
@@ -501,6 +511,7 @@ export default function SmartGarmentScanner({
 
   const runStyleDetection = async (dataUrl: string) => {
     const seq = ++analysisSeqRef.current;
+    setAutoPinsMap(null);
     setDetectionState({
       status: "analyzing",
       progress: 4,
@@ -516,10 +527,22 @@ export default function SmartGarmentScanner({
           });
         }
       },
+      onAutoPinsReady: (pinsByCategory) => {
+        if (analysisSeqRef.current === seq) {
+          setAutoPinsMap(pinsByCategory);
+          const currentPins = pinsByCategory[activeCategoryRef.current];
+          if (currentPins) {
+            onPinsChange(currentPins);
+          }
+        }
+      },
     });
     if (analysisSeqRef.current !== seq) return;
 
     if (res.status === "detected") {
+      if (res.autoPinsByCategory) {
+        setAutoPinsMap(res.autoPinsByCategory);
+      }
       onApplyDetectedAttributes(res.config);
       setDetectionState({ status: "detected", result: res });
     } else {
@@ -532,6 +555,7 @@ export default function SmartGarmentScanner({
   ) => {
     const sample = createSamplePhoto(kind);
     const seq = ++analysisSeqRef.current;
+    setAutoPinsMap(null);
     setRawUploadSrc(sample);
     setImageSrc(sample);
     const baseCfg = {
@@ -551,6 +575,17 @@ export default function SmartGarmentScanner({
         prep.centralWidth,
         prep.centralHeight
       );
+      const pinsByCategory = calcularPinesAutomaticosPorCategoria({
+        pixels: prep.silhouettePixels,
+        width: prep.silhouetteWidth,
+        height: prep.silhouetteHeight,
+        sourceWidth: prep.sourceWidth,
+        sourceHeight: prep.sourceHeight,
+        trim: prep.trim,
+        colorDominante,
+      });
+      setAutoPinsMap(pinsByCategory);
+
       const updatedCfg: DetectedGarmentConfig = {
         ...baseCfg,
         apariencia3D: {
@@ -558,6 +593,7 @@ export default function SmartGarmentScanner({
           tela: baseCfg.apariencia3D?.tela ?? "crepe",
           estampado: "liso",
         },
+        autoPins: pinsByCategory[baseCfg.category],
       };
       onApplyDetectedAttributes(updatedCfg);
 
@@ -668,6 +704,7 @@ export default function SmartGarmentScanner({
         modelId: "preset+colorExtractor",
         backend: "wasm",
         cropTrimmedBars: false,
+        autoPinsByCategory: pinsByCategory,
       };
       setDetectionState({ status: "detected", result: sampleResult, isSample: true });
     } catch {
@@ -885,11 +922,16 @@ export default function SmartGarmentScanner({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => onPinsChange(getDefaultPinsForCategory(category))}
+                onClick={() =>
+                  onPinsChange(
+                    autoPinsMap?.[category] ??
+                      getDefaultPinsForCategory(category)
+                  )
+                }
                 className="text-xs sm:text-sm font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#FAF8F5] border border-slate-200 cursor-pointer"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
-                Centrar puntos
+                {autoPinsMap ? "Ajustar a prenda" : "Centrar puntos"}
               </button>
               <button
                 type="button"
@@ -908,6 +950,7 @@ export default function SmartGarmentScanner({
               type="button"
               onClick={() => {
                 analysisSeqRef.current += 1;
+                setAutoPinsMap(null);
                 setDetectionState({ status: "idle" });
                 setImageSrc(null);
                 setRawUploadSrc(null);
@@ -1229,6 +1272,8 @@ export default function SmartGarmentScanner({
                   key={item.id}
                   type="button"
                   onClick={() => {
+                    const nextCat: GarmentCategory =
+                      item.id === "jacket" ? "top" : item.id;
                     if (item.id === "jacket") {
                       onCategoryChange("top");
                       onTopSubStyleChange("jacket");
@@ -1240,6 +1285,9 @@ export default function SmartGarmentScanner({
                       }
                     } else {
                       onCategoryChange(item.id);
+                    }
+                    if (autoPinsMap?.[nextCat]) {
+                      onPinsChange(autoPinsMap[nextCat]);
                     }
                   }}
                   className={`min-h-[58px] p-2.5 rounded-2xl border-2 flex items-center gap-2 text-left transition cursor-pointer ${

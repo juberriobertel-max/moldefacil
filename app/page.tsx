@@ -352,8 +352,13 @@ export default function HomePage() {
         estampado: cfg.apariencia3D!.estampado,
       }));
     }
-    setPins(getDefaultPinsForCategory(cfg.category));
-    setPinsMoved(false);
+    if (cfg.autoPins) {
+      setPins(cfg.autoPins);
+      setPinsMoved(true);
+    } else {
+      setPins(getDefaultPinsForCategory(cfg.category));
+      setPinsMoved(false);
+    }
     setActiveFashionStyleId(null);
     setActivePieceId("all");
   };

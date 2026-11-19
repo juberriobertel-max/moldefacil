@@ -1,3 +1,4 @@
+import { GarmentCategory, TracingPins } from "./types";
 import {
   DominantColorResult,
   extraerColorDominantePrenda,
@@ -6,6 +7,7 @@ import {
   preprocesarImagenPrenda,
   VisionCropKey,
 } from "./vision/imagePreprocessor";
+import { calcularPinesAutomaticosPorCategoria } from "./vision/pinAutoPlacer";
 import {
   aplicarCorreccionUnToque,
   aplicarReglasCoherenciaModisteria,
@@ -227,6 +229,9 @@ export async function detectFashionStyleInBrowser(
   options?: {
     timeoutMs?: number;
     onProgress?: (percent: number, stepLabel?: string) => void;
+    onAutoPinsReady?: (
+      pinsByCategory: Record<GarmentCategory, TracingPins>
+    ) => void;
   }
 ): Promise<BrowserStyleDetectionResult> {
   if (typeof window === "undefined") {
@@ -254,6 +259,17 @@ export async function detectFashionStyleInBrowser(
         prep.centralWidth,
         prep.centralHeight
       );
+
+      const autoPinsByCategory = calcularPinesAutomaticosPorCategoria({
+        pixels: prep.silhouettePixels,
+        width: prep.silhouetteWidth,
+        height: prep.silhouetteHeight,
+        sourceWidth: prep.sourceWidth,
+        sourceHeight: prep.sourceHeight,
+        trim: prep.trim,
+        colorDominante,
+      });
+      options?.onAutoPinsReady?.(autoPinsByCategory);
 
       const cropInputs: Record<VisionCropKey, CropRawInput> = {
         full: {
@@ -289,6 +305,7 @@ export async function detectFashionStyleInBrowser(
         ...rawEval,
         colorDominante,
         cropTrimmedBars: prep.trim.barDetected,
+        autoPinsByCategory,
       });
 
       return {

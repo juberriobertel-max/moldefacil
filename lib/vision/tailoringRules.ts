@@ -16,6 +16,7 @@ import {
   StyleVariant,
   TopSubStyle,
   TorsoFit,
+  TracingPins,
   TwoPieceBottomStyle,
   TwoPieceTopStyle,
 } from "../types";
@@ -60,6 +61,7 @@ export interface DetectedGarmentConfig {
     tela: TipoTela;
     estampado: TipoEstampado;
   };
+  autoPins?: TracingPins;
 }
 
 export interface DetectedAttributeCandidate {
@@ -118,6 +120,7 @@ export interface RawVisionEvaluation {
   fabric: EvaluatedPromptGroup<TipoTela>;
   print: EvaluatedPromptGroup<TipoEstampado>;
   colorDominante: DominantColorResult;
+  autoPinsByCategory?: Record<GarmentCategory, TracingPins>;
 }
 
 export interface TailoredVisionOutput {
@@ -131,6 +134,7 @@ export interface TailoredVisionOutput {
   modelId: string;
   backend: "webgpu" | "wasm";
   cropTrimmedBars: boolean;
+  autoPinsByCategory?: Record<GarmentCategory, TracingPins>;
 }
 
 function top2DesdeGrupo<T extends string>(
@@ -360,6 +364,7 @@ export function aplicarReglasCoherenciaModisteria(
         tela: telaId,
         estampado: estampadoId,
       },
+      autoPins: raw.autoPinsByCategory?.accessories,
     };
 
     return {
@@ -390,6 +395,7 @@ export function aplicarReglasCoherenciaModisteria(
       modelId: raw.modelId,
       backend: raw.backend,
       cropTrimmedBars: raw.cropTrimmedBars,
+      autoPinsByCategory: raw.autoPinsByCategory,
     };
   }
 
@@ -460,6 +466,21 @@ export function aplicarReglasCoherenciaModisteria(
   const telaId = raw.fabric.top1.id;
   const estampadoId = raw.print.top1.id;
 
+  const rawPinsCat = raw.autoPinsByCategory?.[mappedCat.category];
+  const resolvedAutoPins: TracingPins | undefined = rawPinsCat
+    ? {
+        ...rawPinsCat,
+        neckline:
+          !esSoloInferior &&
+          (neckMapped.wrapFront || neckMapped.necklineStyle === "v_neck")
+            ? {
+                ...rawPinsCat.neckline,
+                y: Number(Math.min(0.88, rawPinsCat.neckline.y + 0.035).toFixed(4)),
+              }
+            : rawPinsCat.neckline,
+      }
+    : undefined;
+
   const config: DetectedGarmentConfig = {
     ...mappedCat,
     necklineStyle: neckMapped.necklineStyle,
@@ -474,6 +495,7 @@ export function aplicarReglasCoherenciaModisteria(
       tela: telaId,
       estampado: estampadoId,
     },
+    autoPins: resolvedAutoPins,
   };
 
   const atributosConConfianza: DetectedAttributeItem[] = [
@@ -569,6 +591,7 @@ export function aplicarReglasCoherenciaModisteria(
     modelId: raw.modelId,
     backend: raw.backend,
     cropTrimmedBars: raw.cropTrimmedBars,
+    autoPinsByCategory: raw.autoPinsByCategory,
   };
 }
 
@@ -679,6 +702,28 @@ export function aplicarCorreccionUnToque(
       reglaAplicada: "Confirmado en 1 toque",
     };
   });
+
+  if (key === "category" && resultado.autoPinsByCategory?.[nextConfig.category]) {
+    nextConfig.autoPins = {
+      ...resultado.autoPinsByCategory[nextConfig.category],
+    };
+  } else if (
+    key === "neckline" &&
+    resultado.autoPinsByCategory?.[nextConfig.category]
+  ) {
+    const basePins = resultado.autoPinsByCategory[nextConfig.category];
+    const esEscoteProfundo =
+      nextConfig.extras.wrapFront || nextConfig.necklineStyle === "v_neck";
+    nextConfig.autoPins = {
+      ...basePins,
+      neckline: {
+        ...basePins.neckline,
+        y: esEscoteProfundo
+          ? Number(Math.min(0.88, basePins.neckline.y + 0.035).toFixed(4))
+          : basePins.neckline.y,
+      },
+    };
+  }
 
   return {
     ...resultado,
