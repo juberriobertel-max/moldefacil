@@ -1,18 +1,51 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { evaluarPerfilEnY } from "./bodyProfile";
 import { disposeObject } from "./disposal";
-import { AnilloPerfil, PerfilCuerpo } from "./types";
+import { AcabadoManiqui3D, AnilloPerfil, PerfilCuerpo } from "./types";
 
 export interface ManiquiInstancia {
   grupo: THREE.Group;
   materialesCompartidos: THREE.Material[];
   texturasCompartidas: THREE.Texture[];
   actualizar: (perfil: PerfilCuerpo) => void;
+  aplicarAcabado: (acabado: AcabadoManiqui3D) => void;
+  mostrarCintasGuia: (visible: boolean) => void;
 }
 
 const SEGMENTOS_RADIALES_TORSO = 48;
-const COLOR_CUERPO_MANIQUI = 0xd9d9d6;
-const COLOR_ARTICULACION_MANIQUI = 0xbdbdb8;
+const ACABADOS_MANIQUI: Record<
+  AcabadoManiqui3D,
+  {
+    cuerpo: number;
+    articulacion: number;
+    cinta: number;
+    roughnessCuerpo: number;
+    roughnessArt: number;
+  }
+> = {
+  lino: {
+    cuerpo: 0xd9d9d6,
+    articulacion: 0xbdbdb8,
+    cinta: 0x1e1b18,
+    roughnessCuerpo: 0.8,
+    roughnessArt: 0.78,
+  },
+  grafito: {
+    cuerpo: 0x35383d,
+    articulacion: 0x232529,
+    cinta: 0xe6dccb,
+    roughnessCuerpo: 0.72,
+    roughnessArt: 0.7,
+  },
+  madera: {
+    cuerpo: 0xc89d74,
+    articulacion: 0x9e744f,
+    cinta: 0x2a1c14,
+    roughnessCuerpo: 0.64,
+    roughnessArt: 0.62,
+  },
+};
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
@@ -380,6 +413,92 @@ function crearGeometriaPieZapatoPlano(
 }
 
 /**
+ * Construye las cintas de modistería anatómicas (busto, cintura, cadera y líneas centrales)
+ * adheridas suavemente (+1.3 mm) sobre la superficie del maniquí sin z-fighting.
+ */
+function crearGrupoCintasModisteria(
+  perfil: PerfilCuerpo,
+  materialCinta: THREE.Material
+): THREE.Group {
+  const grupoCintas = new THREE.Group();
+  grupoCintas.name = "maniqui-cintas-modisteria";
+
+  const anillosGuia = [
+    { nombre: "cinta-busto", anillo: perfil.anillosClave.busto },
+    { nombre: "cinta-cintura", anillo: perfil.anillosClave.cintura },
+    { nombre: "cinta-cadera", anillo: perfil.anillosClave.cadera },
+  ];
+
+  const offsetM = 0.0014;
+  const semiAncho = 0.0028;
+  const segs = 48;
+
+  for (const g of anillosGuia) {
+    const pos: number[] = [];
+    const idx: number[] = [];
+    const yTop = g.anillo.y + semiAncho;
+    const yBot = g.anillo.y - semiAncho;
+    const aR = g.anillo.a + offsetM;
+    const bR = g.anillo.b + offsetM;
+
+    for (let s = 0; s <= segs; s++) {
+      const th = (s / segs) * Math.PI * 2;
+      const px = aR * Math.sin(th);
+      const pz = g.anillo.desplazamientoZ + bR * Math.cos(th);
+      pos.push(px, yTop, pz, px, yBot, pz);
+    }
+    for (let s = 0; s < segs; s++) {
+      const i0 = s * 2;
+      idx.push(i0, i0 + 1, i0 + 2, i0 + 2, i0 + 1, i0 + 3);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, materialCinta);
+    mesh.name = g.nombre;
+    grupoCintas.add(mesh);
+  }
+
+  // Líneas centrales delantero (θ = 0) y espalda (θ = π)
+  const yTopVert = perfil.cuelloYM - 0.015;
+  const yBotVert = perfil.caderaYM - 0.01;
+  const pasosV = 24;
+  for (const linea of [
+    { nombre: "cinta-centro-delantero", theta: 0 },
+    { nombre: "cinta-centro-espalda", theta: Math.PI },
+  ]) {
+    const pos: number[] = [];
+    const idx: number[] = [];
+    const signoZ = linea.theta === 0 ? 1 : -1;
+
+    for (let i = 0; i <= pasosV; i++) {
+      const y = THREE.MathUtils.lerp(yTopVert, yBotVert, i / pasosV);
+      const an = evaluarPerfilEnY(perfil.anillosInterpolados, y);
+      const pz = an.desplazamientoZ + signoZ * (an.b + offsetM);
+      pos.push(-semiAncho, y, pz, semiAncho, y, pz);
+    }
+    for (let i = 0; i < pasosV; i++) {
+      const i0 = i * 2;
+      if (signoZ > 0) {
+        idx.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3);
+      } else {
+        idx.push(i0, i0 + 1, i0 + 2, i0 + 1, i0 + 3, i0 + 2);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, materialCinta);
+    mesh.name = linea.nombre;
+    grupoCintas.add(mesh);
+  }
+
+  return grupoCintas;
+}
+
+/**
  * Crea la figura articulada humana completa de pie apoyada en y = 0, sin trípode ni pedestal.
  */
 export function crearManiqui(perfilInicial: PerfilCuerpo): ManiquiInstancia {
@@ -390,25 +509,36 @@ export function crearManiqui(perfilInicial: PerfilCuerpo): ManiquiInstancia {
   grupoDinamico.name = "maniqui-segmentos-dinamicos";
   grupo.add(grupoDinamico);
 
+  const acabadoIni = ACABADOS_MANIQUI.lino;
   const materialCuerpo = new THREE.MeshStandardMaterial({
-    color: COLOR_CUERPO_MANIQUI,
-    roughness: 0.8,
+    color: acabadoIni.cuerpo,
+    roughness: acabadoIni.roughnessCuerpo,
     metalness: 0,
     side: THREE.FrontSide,
   });
 
   const materialArticulacion = new THREE.MeshStandardMaterial({
-    color: COLOR_ARTICULACION_MANIQUI,
-    roughness: 0.78,
+    color: acabadoIni.articulacion,
+    roughness: acabadoIni.roughnessArt,
     metalness: 0,
     side: THREE.FrontSide,
+  });
+
+  const materialCinta = new THREE.MeshStandardMaterial({
+    color: acabadoIni.cinta,
+    roughness: 0.65,
+    metalness: 0.05,
+    side: THREE.DoubleSide,
   });
 
   const materialesSet = new Set<THREE.Material>([
     materialCuerpo,
     materialArticulacion,
+    materialCinta,
   ]);
   const texturasVacias = new Set<THREE.Texture>();
+  let cintasVisible = false;
+  let refGrupoCintas: THREE.Group | null = null;
 
   // Geometría compartida e instanciada para todas las 14 articulaciones
   const geometriaArticulacion = new THREE.SphereGeometry(1, 14, 10);
@@ -712,14 +842,34 @@ export function crearManiqui(perfilInicial: PerfilCuerpo): ManiquiInstancia {
     }
     articulacionesInstanciadas.instanceMatrix.needsUpdate = true;
     articulacionesInstanciadas.computeBoundingSphere();
+
+    // 7. Cintas guía de modistería sobre busto, cintura, cadera y líneas centrales
+    const cintas = crearGrupoCintasModisteria(perfil, materialCinta);
+    cintas.visible = cintasVisible;
+    refGrupoCintas = cintas;
+    grupoDinamico.add(cintas);
   };
 
   actualizar(perfilInicial);
 
   return {
     grupo,
-    materialesCompartidos: [materialCuerpo, materialArticulacion],
+    materialesCompartidos: [materialCuerpo, materialArticulacion, materialCinta],
     texturasCompartidas: [],
     actualizar,
+    aplicarAcabado(acabado: AcabadoManiqui3D) {
+      const cfg = ACABADOS_MANIQUI[acabado] ?? ACABADOS_MANIQUI.lino;
+      materialCuerpo.color.setHex(cfg.cuerpo);
+      materialCuerpo.roughness = cfg.roughnessCuerpo;
+      materialArticulacion.color.setHex(cfg.articulacion);
+      materialArticulacion.roughness = cfg.roughnessArt;
+      materialCinta.color.setHex(cfg.cinta);
+    },
+    mostrarCintasGuia(visible: boolean) {
+      cintasVisible = visible;
+      if (refGrupoCintas) {
+        refGrupoCintas.visible = visible;
+      }
+    },
   };
 }

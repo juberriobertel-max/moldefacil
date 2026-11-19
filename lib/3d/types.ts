@@ -13,6 +13,7 @@ import {
   QuickLengthPreset,
   SkirtSubStyle,
   SleeveStyle,
+  SolvedTracingProportions,
   StyleVariant,
   TopSubStyle,
   TorsoFit,
@@ -76,6 +77,14 @@ export type TipoSilueta = "entallado" | "holgado";
 export type TipoVuelo = "recta" | "evase" | "circular";
 export type TipoPantalon = "recto" | "palazzo" | "legging";
 
+export type AcabadoManiqui3D = "lino" | "grafito" | "madera";
+export type PoseManiquiTipo = "relajada" | "pasarela" | "brazosAbiertos";
+export type SubEstiloEspecial3D =
+  | "overall"
+  | "baby_bodysuit"
+  | "apron"
+  | "zipper_pouch";
+
 export type ConfigPrenda = {
   prenda: TipoPrenda;
   escote: TipoEscote;
@@ -94,6 +103,10 @@ export type ConfigPrenda = {
   corteImperio?: boolean;
   esShort?: boolean;
   esInfantil?: boolean;
+  proporcionesFoto?: SolvedTracingProportions;
+  bolsillosLaterales?: boolean;
+  bolsillosConTapa?: boolean;
+  subEstiloEspecial?: SubEstiloEspecial3D;
 };
 
 export type TipoTela = "seda" | "crepe" | "lino" | "licra";
@@ -104,6 +117,10 @@ export type Apariencia = {
   color: string;
   estampado: TipoEstampado;
   mostrarCosturas: boolean;
+  colorSecundario?: string;
+  acabadoManiqui?: AcabadoManiqui3D;
+  mostrarMapaCalce?: boolean;
+  poseManiqui?: PoseManiquiTipo;
 };
 
 export interface ColorRapido {
@@ -132,6 +149,9 @@ export const APARIENCIA_POR_DEFECTO: Apariencia = {
   color: "#C85A32",
   estampado: "liso",
   mostrarCosturas: false,
+  acabadoManiqui: "lino",
+  mostrarMapaCalce: false,
+  poseManiqui: "relajada",
 };
 
 export type NombreSeccionAnatomica =
@@ -180,6 +200,26 @@ export const POSE_RELAJADA_POR_DEFECTO: PoseManiquiArticulado = {
   palmaHaciaMuslo: true,
   factorSeparacionPiesCadera: 0.48,
   rotacionPieDeg: 6,
+};
+
+export const POSES_MANIQUI_3D: Record<PoseManiquiTipo, PoseManiquiArticulado> = {
+  relajada: POSE_RELAJADA_POR_DEFECTO,
+  pasarela: {
+    nombre: "pose_pasarela",
+    anguloBrazoDeg: 18,
+    flexionCodoDeg: 19,
+    palmaHaciaMuslo: true,
+    factorSeparacionPiesCadera: 0.36,
+    rotacionPieDeg: 9,
+  },
+  brazosAbiertos: {
+    nombre: "pose_brazos_abiertos",
+    anguloBrazoDeg: 30,
+    flexionCodoDeg: 6,
+    palmaHaciaMuslo: false,
+    factorSeparacionPiesCadera: 0.54,
+    rotacionPieDeg: 7,
+  },
 };
 
 export interface TrayectoriaBrazo3D {
@@ -248,7 +288,14 @@ export type NivelDetalle3D = "movil" | "escritorio";
 
 export interface Etiqueta3DAncla {
   id: string;
-  texto: "Delantero" | "Trasero" | "Vista 4 cm" | "Pinza" | "Cinturón";
+  texto:
+    | "Delantero"
+    | "Trasero"
+    | "Vista 4 cm"
+    | "Pinza"
+    | "Cinturón"
+    | "Bolsillo"
+    | (string & {});
   posicionLocalM: [number, number, number];
   normalLocal: [number, number, number];
 }
@@ -273,6 +320,7 @@ export interface EstadoDelMoldePara3D {
   styleVariant: StyleVariant;
   measurements: Measurements;
   fabricType: FabricType;
+  tracingProportions?: SolvedTracingProportions | null;
 }
 
 function clamp(v: number, min: number, max: number): number {
@@ -447,22 +495,58 @@ export function toConfigPrenda(estado: EstadoDelMoldePara3D): ConfigPrenda {
     (estado.category === "jumpsuit" &&
       estado.jumpsuitSubStyle === "romper_short");
 
+  const propsFoto =
+    estado.quickLength === "photo" && estado.tracingProportions
+      ? estado.tracingProportions
+      : undefined;
+
   let largoDeseado = largoResuelto.measurements.skirtLength;
   if (prenda === "pantalon" || prenda === "enterizo") {
     largoDeseado = esShort
       ? Math.min(34, Math.max(12, largoResuelto.measurements.inseam * 0.45))
       : largoResuelto.measurements.inseam;
+    if (propsFoto && !largoResuelto.overrideBottomLength) {
+      largoDeseado = Math.round(largoDeseado * propsFoto.lengthMultiplier);
+    }
   } else if (prenda === "blusa" || prenda === "chaqueta") {
     const baseTop =
       estado.measurements.bodiceLength +
       (prenda === "chaqueta" ? 20 : 16);
-    largoDeseado = Math.round(baseTop * largoResuelto.topScaleForLength);
+    largoDeseado = Math.round(
+      baseTop *
+        largoResuelto.topScaleForLength *
+        (propsFoto ? propsFoto.topLengthMultiplier : 1)
+    );
   } else if (
     estado.category === "two_piece" &&
     estado.twoPieceBottomStyle === "long_skirt" &&
     estado.quickLength === "photo"
   ) {
-    largoDeseado = Math.max(largoDeseado, 88);
+    largoDeseado = Math.max(
+      Math.round(largoDeseado * (propsFoto ? propsFoto.bottomLengthMultiplier : 1)),
+      88
+    );
+  } else if (propsFoto && !largoResuelto.overrideBottomLength) {
+    const factorLargo =
+      estado.category === "two_piece"
+        ? propsFoto.bottomLengthMultiplier
+        : propsFoto.lengthMultiplier;
+    largoDeseado = Math.round(largoDeseado * factorLargo);
+  }
+
+  let subEstiloEspecial: SubEstiloEspecial3D | undefined;
+  if (estado.category === "jumpsuit" && estado.jumpsuitSubStyle === "overall") {
+    subEstiloEspecial = "overall";
+  } else if (
+    estado.category === "kids" &&
+    estado.kidsSubStyle === "baby_bodysuit"
+  ) {
+    subEstiloEspecial = "baby_bodysuit";
+  } else if (estado.category === "accessories") {
+    if (estado.accessorySubStyle === "apron") subEstiloEspecial = "apron";
+    else if (estado.accessorySubStyle === "zipper_pouch") {
+      subEstiloEspecial = "zipper_pouch";
+    }
   }
 
   return {
@@ -488,6 +572,10 @@ export function toConfigPrenda(estado: EstadoDelMoldePara3D): ConfigPrenda {
     esShort,
     esInfantil:
       estado.category === "kids" || estado.measurements.bust < 72,
+    proporcionesFoto: propsFoto ?? estado.tracingProportions ?? undefined,
+    bolsillosLaterales: Boolean(estado.extras.sidePockets),
+    bolsillosConTapa: Boolean(estado.extras.flapPockets),
+    subEstiloEspecial,
   };
 }
 

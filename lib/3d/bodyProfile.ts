@@ -327,23 +327,33 @@ function calcularTrayectoriasCuerpo(params: {
   const thighZ = hipZ + (kneeZ - hipZ) * tMusloAxis;
 
   const rotPieRad = deg2rad(pose.rotacionPieDeg);
-  const crearTrayectoriaPierna = (lado: -1 | 1): TrayectoriaPierna3D => ({
-    lado,
-    cadera: [lado * hipBaseX, hipY, hipZ],
-    musloAlto: [lado * thighX, thighY, thighZ],
-    rodilla: [lado * kneeX, alturaRodillaM, kneeZ],
-    tobillo: [lado * ankleX, alturaTobilloM, ankleZ],
-    piePunta: [
-      lado * (ankleX + Math.sin(rotPieRad) * largoPieM * 0.72),
-      0.012 * escEst,
-      ankleZ + Math.cos(rotPieRad) * largoPieM * 0.78,
-    ],
-    radioCaderaM,
-    radioMusloM,
-    radioRodillaM,
-    radioTobilloM,
-    largoPieM,
-  });
+  const esPasarela = pose.nombre === "pose_pasarela";
+  const crearTrayectoriaPierna = (lado: -1 | 1): TrayectoriaPierna3D => {
+    const pasoZ = esPasarela ? (lado === 1 ? 0.042 : -0.032) * escEst : 0;
+    const pasoRodZ = esPasarela ? (lado === 1 ? 0.03 : -0.02) * escEst : 0;
+    const rodY = alturaRodillaM + (esPasarela && lado === 1 ? 0.004 * escEst : 0);
+    const kneeLatFactor = esPasarela ? 0.88 : 1;
+    const kx = lado * kneeX * kneeLatFactor;
+    const ax = lado * ankleX * kneeLatFactor;
+
+    return {
+      lado,
+      cadera: [lado * hipBaseX, hipY, hipZ],
+      musloAlto: [lado * thighX * (esPasarela ? 0.94 : 1), thighY, thighZ + pasoRodZ * 0.45],
+      rodilla: [kx, rodY, kneeZ + pasoRodZ],
+      tobillo: [ax, alturaTobilloM, ankleZ + pasoZ],
+      piePunta: [
+        ax + lado * Math.sin(rotPieRad) * largoPieM * 0.72,
+        0.012 * escEst,
+        ankleZ + pasoZ + Math.cos(rotPieRad) * largoPieM * 0.78,
+      ],
+      radioCaderaM,
+      radioMusloM,
+      radioRodillaM,
+      radioTobilloM,
+      largoPieM,
+    };
+  };
 
   return {
     alturaCabezaM,

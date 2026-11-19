@@ -78,7 +78,10 @@ export function obtenerParametrosTela(tela: TipoTela): ConfiguracionFisicaTela {
 
 export interface RepositorioMaterialesTela {
   obtenerMaterial: (apariencia: Apariencia) => THREE.MeshPhysicalMaterial;
+  obtenerMaterialSecundario: (apariencia: Apariencia) => THREE.MeshPhysicalMaterial;
   obtenerMaterialVista: (apariencia: Apariencia) => THREE.MeshPhysicalMaterial;
+  obtenerMaterialMapaCalce: () => THREE.MeshPhysicalMaterial;
+  obtenerMaterialResaltado: (apariencia: Apariencia) => THREE.MeshPhysicalMaterial;
   texturasCacheadas: () => ReadonlySet<THREE.Texture>;
   materialesCompartidos: () => ReadonlySet<THREE.Material>;
   tamanoCache: () => number;
@@ -401,7 +404,8 @@ export function configurarRendererEscena3D(renderer: THREE.WebGLRenderer): void 
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.04;
-  renderer.shadowMap.enabled = false;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
   renderer.setPixelRatio(Math.min(dpr, 2));
 }
@@ -445,9 +449,19 @@ export function configurarIluminacionYEntorno3D(
   const luzHemi = new THREE.HemisphereLight("#FAF6F0", "#CBBFB0", 0.65);
   luces.add(luzHemi);
 
-  // Luz clave cálida principal (delantero derecho superior)
+  // Luz clave cálida principal (delantero derecho superior) con sombras suaves PCF
   const luzClave = new THREE.DirectionalLight("#FFF4E6", 2.15);
   luzClave.position.set(2.2, 3.1, 2.7);
+  luzClave.castShadow = true;
+  luzClave.shadow.mapSize.set(1024, 1024);
+  luzClave.shadow.bias = -0.0006;
+  luzClave.shadow.normalBias = 0.012;
+  luzClave.shadow.camera.left = -0.9;
+  luzClave.shadow.camera.right = 0.9;
+  luzClave.shadow.camera.top = 1.9;
+  luzClave.shadow.camera.bottom = -0.1;
+  luzClave.shadow.camera.near = 0.5;
+  luzClave.shadow.camera.far = 6.5;
   luces.add(luzClave);
 
   // Luz de relleno suave izquierda
@@ -625,6 +639,16 @@ export function crearRepositorioMateriales(
   });
   materialPrincipal.name = "material-tela-principal";
 
+  // Material secundario para falda/pantalón en conjuntos de 2 piezas
+  const materialSecundario = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color("#FFFFFF"),
+    roughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].roughness,
+    sheen: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheen,
+    sheenRoughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheenRoughness,
+    side: THREE.DoubleSide,
+  });
+  materialSecundario.name = "material-tela-secundario";
+
   // Material sutilmente contrastado para vista de 4 cm, pretina y lazo sin reconstruir malla
   const materialVista = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color("#F4F0EA"),
@@ -634,7 +658,35 @@ export function crearRepositorioMateriales(
   });
   materialVista.name = "material-tela-vista";
 
-  const materialesSet = new Set<THREE.Material>([materialPrincipal, materialVista]);
+  // Material para modo "Mapa de Calce" con vertexColors térmicos de holgura
+  const materialMapaCalce = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color("#FFFFFF"),
+    vertexColors: true,
+    roughness: 0.52,
+    metalness: 0,
+    sheen: 0.25,
+    side: THREE.DoubleSide,
+  });
+  materialMapaCalce.name = "material-mapa-calce";
+
+  // Material con resaltado cálido para destacar la pieza seleccionada 2D <-> 3D
+  const materialResaltado = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color("#FFFFFF"),
+    roughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].roughness,
+    sheen: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheen,
+    emissive: new THREE.Color("#C85A32"),
+    emissiveIntensity: 0.24,
+    side: THREE.DoubleSide,
+  });
+  materialResaltado.name = "material-pieza-resaltada";
+
+  const materialesSet = new Set<THREE.Material>([
+    materialPrincipal,
+    materialSecundario,
+    materialVista,
+    materialMapaCalce,
+    materialResaltado,
+  ]);
 
   const obtenerOTexturaAlbedo = (apariencia: Apariencia): THREE.Texture => {
     const colorNorm = normalizarHex(apariencia.color);
@@ -697,16 +749,32 @@ export function crearRepositorioMateriales(
 
   // Pre-poblar apariencia inicial
   aplicarEnMaterial(materialPrincipal, APARIENCIA_POR_DEFECTO, "#FFFFFF");
+  aplicarEnMaterial(materialSecundario, APARIENCIA_POR_DEFECTO, "#FFFFFF");
   aplicarEnMaterial(materialVista, APARIENCIA_POR_DEFECTO, "#F2ECE4");
+  aplicarEnMaterial(materialResaltado, APARIENCIA_POR_DEFECTO, "#FFFFFF");
 
   return {
     obtenerMaterial(apariencia: Apariencia) {
       aplicarEnMaterial(materialPrincipal, apariencia, "#FFFFFF");
       return materialPrincipal;
     },
+    obtenerMaterialSecundario(apariencia: Apariencia) {
+      const apSec: Apariencia = apariencia.colorSecundario
+        ? { ...apariencia, color: apariencia.colorSecundario }
+        : apariencia;
+      aplicarEnMaterial(materialSecundario, apSec, "#FFFFFF");
+      return materialSecundario;
+    },
     obtenerMaterialVista(apariencia: Apariencia) {
       aplicarEnMaterial(materialVista, apariencia, "#F2ECE4");
       return materialVista;
+    },
+    obtenerMaterialMapaCalce() {
+      return materialMapaCalce;
+    },
+    obtenerMaterialResaltado(apariencia: Apariencia) {
+      aplicarEnMaterial(materialResaltado, apariencia, "#FFFFFF");
+      return materialResaltado;
     },
     texturasCacheadas() {
       return todasTexturas;
@@ -719,7 +787,10 @@ export function crearRepositorioMateriales(
     },
     dispose() {
       materialPrincipal.dispose();
+      materialSecundario.dispose();
       materialVista.dispose();
+      materialMapaCalce.dispose();
+      materialResaltado.dispose();
       todasTexturas.forEach((tex) => tex.dispose());
       todasTexturas.clear();
       cacheAlbedo.clear();
