@@ -447,6 +447,7 @@ export default function HomePage() {
         styleVariant,
         measurements,
         fabricType,
+        tracingProportions,
       }),
     [
       category,
@@ -468,6 +469,7 @@ export default function HomePage() {
       styleVariant,
       measurements,
       fabricType,
+      tracingProportions,
     ]
   );
 
@@ -1635,6 +1637,9 @@ export default function HomePage() {
                 config={configPrenda3D}
                 apariencia={aparienciaEfectiva3D}
                 onAparienciaChange={handleApariencia3DChange}
+                patternPieces={pattern.pieces}
+                activePieceId={activePieceId}
+                onActivePieceIdChange={setActivePieceId}
               />
             )}
 
@@ -1658,6 +1663,9 @@ export default function HomePage() {
                     apariencia={aparienciaEfectiva3D}
                     onAparienciaChange={handleApariencia3DChange}
                     modoCompacto
+                    patternPieces={pattern.pieces}
+                    activePieceId={activePieceId}
+                    onActivePieceIdChange={setActivePieceId}
                   />
                 </div>
               </div>

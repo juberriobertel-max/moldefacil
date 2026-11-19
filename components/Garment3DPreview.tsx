@@ -4,15 +4,20 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
+  Activity,
   AlertTriangle,
+  Camera,
   Eye,
   Grid,
   Layers,
   RotateCw,
   Scissors,
+  Sliders,
   Sparkles,
   User,
+  X,
 } from "lucide-react";
+import { PatternPiece } from "@/lib/types";
 import { getBodyProfile } from "@/lib/3d/bodyProfile";
 import { disposeObject } from "@/lib/3d/disposal";
 import {
@@ -27,13 +32,19 @@ import {
   SombraContactoPedestal,
 } from "@/lib/3d/fabricMaterials";
 import {
+  aplicarMapaCalceEnPrenda,
+  aplicarResaltadoPieza,
+  buscarPieceIdPorZona3D,
   construirMallaPrenda,
   Etiqueta3DProyectada,
+  mapearPieceIdAZona3D,
   proyectarEtiquetas3D,
   ResultadoMallaPrenda,
+  ZonaPieza3D,
 } from "@/lib/3d/garmentMeshBuilder";
 import { crearManiqui, ManiquiInstancia } from "@/lib/3d/mannequinBuilder";
 import {
+  AcabadoManiqui3D,
   Apariencia,
   COLORES_RAPIDOS,
   ConfigPrenda,
@@ -41,6 +52,8 @@ import {
   NivelDetalle3D,
   PALETA_UI_3D,
   PerfilCuerpo,
+  POSES_MANIQUI_3D,
+  PoseManiquiTipo,
   TipoEstampado,
   TipoTela,
 } from "@/lib/3d/types";
@@ -52,10 +65,43 @@ export interface Garment3DPreviewProps {
   onAparienciaChange: (siguiente: Apariencia) => void;
   autoGirarInicial?: boolean;
   modoCompacto?: boolean;
+  patternPieces?: PatternPiece[];
+  activePieceId?: string;
+  onActivePieceIdChange?: (pieceId: string) => void;
 }
 
 type VistaCamaraPreset = "frente" | "espalda" | "detalle";
-type PopoverActivo = "color" | "estampado" | "tela" | null;
+type PopoverActivo = "color" | "estampado" | "tela" | "estudio" | null;
+
+const OPCIONES_POSES: ReadonlyArray<{
+  id: PoseManiquiTipo;
+  nombre: string;
+  desc: string;
+}> = [
+  { id: "relajada", nombre: "Relajada", desc: "Postura natural de taller" },
+  { id: "pasarela", nombre: "Pasarela", desc: "Paso estilizado en movimiento" },
+  { id: "brazosAbiertos", nombre: "Brazos 45°", desc: "Despeja sisa y kimono" },
+];
+
+const OPCIONES_MANIQUI: ReadonlyArray<{
+  id: AcabadoManiqui3D;
+  nombre: string;
+  color: string;
+}> = [
+  { id: "lino", nombre: "Lino Claro", color: "#D9D9D6" },
+  { id: "grafito", nombre: "Grafito Mate", color: "#35383D" },
+  { id: "madera", nombre: "Madera Sastre", color: "#C89D74" },
+];
+
+const NOMBRES_PRENDA_UI: Record<ConfigPrenda["prenda"], string> = {
+  vestido: "Vestido",
+  blusa: "Blusa / Top",
+  falda: "Falda",
+  pantalon: "Pantalón",
+  chaqueta: "Chaqueta / Blazer",
+  enterizo: "Enterizo",
+  bucketHat: "Sombrero Pescador",
+};
 
 const OPCIONES_ESTAMPADO: ReadonlyArray<{
   id: TipoEstampado;
@@ -110,6 +156,7 @@ interface EstadoMotor3D {
   nivelDetalleActual: NivelDetalle3D;
   configActual: ConfigPrenda;
   medidasActual: Medidas;
+  poseActual: PoseManiquiTipo;
 }
 
 function easeInOutCubic(t: number): number {
@@ -139,8 +186,19 @@ function calcularPoseCamaraPreset(
   aspect: number
 ): CamaraObjetivo {
   const esSombrero = config.prenda === "bucketHat";
+  const esCartuchera = config.subEstiloEspecial === "zipper_pouch";
   const distFactor = aspect < 0.85 ? 1.18 : 1.0;
   const h = Math.max(0.8, perfil.alturaTotalM);
+
+  if (esCartuchera) {
+    const dCartuchera = 0.56 * distFactor;
+    const zSigno = preset === "espalda" ? -1 : 1;
+    const xOff = preset === "detalle" ? 0.14 : 0.08;
+    return {
+      posicion: new THREE.Vector3(xOff, 0.99, zSigno * dCartuchera),
+      target: new THREE.Vector3(0, 0.92, 0),
+    };
+  }
 
   // Detalle Escote hace zoom al pecho y cuello (o cabeza si la prenda es bucketHat)
   if (preset === "detalle") {
@@ -189,6 +247,9 @@ export default function Garment3DPreview({
   onAparienciaChange,
   autoGirarInicial = false,
   modoCompacto = false,
+  patternPieces,
+  activePieceId,
+  onActivePieceIdChange,
 }: Garment3DPreviewProps) {
   const contenedorRef = useRef<HTMLDivElement | null>(null);
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
@@ -197,6 +258,11 @@ export default function Garment3DPreview({
   const aparienciaRef = useRef<Apariencia>(apariencia);
   const configRef = useRef<ConfigPrenda>(config);
   const medidasRef = useRef<Medidas>(medidas);
+  const patternPiecesRef = useRef<PatternPiece[] | undefined>(patternPieces);
+  const activePieceIdRef = useRef<string | undefined>(activePieceId);
+  const onActivePieceIdChangeRef = useRef<((pieceId: string) => void) | undefined>(
+    onActivePieceIdChange
+  );
 
   const [popoverAbierto, setPopoverAbierto] = useState<PopoverActivo>(null);
 
@@ -252,7 +318,18 @@ export default function Garment3DPreview({
     configRef.current = config;
     medidasRef.current = medidas;
     autoGirarRef.current = autoGirar;
-  }, [apariencia, config, medidas, autoGirar]);
+    patternPiecesRef.current = patternPieces;
+    activePieceIdRef.current = activePieceId;
+    onActivePieceIdChangeRef.current = onActivePieceIdChange;
+  }, [
+    apariencia,
+    config,
+    medidas,
+    autoGirar,
+    patternPieces,
+    activePieceId,
+    onActivePieceIdChange,
+  ]);
 
   // Al abrir o cerrar menú también se despierta el render bajo demanda según especificación
   useEffect(() => {
@@ -310,8 +387,20 @@ export default function Garment3DPreview({
     scene.add(sombra.mesh);
 
     const repoMateriales = crearRepositorioMateriales(renderer);
-    const perfilIni = getBodyProfile(medidasRef.current);
+    const poseIni: PoseManiquiTipo = aparienciaRef.current.poseManiqui ?? "relajada";
+    const perfilIni = getBodyProfile(medidasRef.current, POSES_MANIQUI_3D[poseIni]);
     const maniqui = crearManiqui(perfilIni);
+    maniqui.aplicarAcabado(aparienciaRef.current.acabadoManiqui ?? "lino");
+    maniqui.mostrarCintasGuia(
+      Boolean(
+        aparienciaRef.current.mostrarCosturas ||
+          aparienciaRef.current.mostrarMapaCalce
+      )
+    );
+    const esCartucheraIni =
+      configRef.current.subEstiloEspecial === "zipper_pouch";
+    maniqui.grupo.visible = !esCartucheraIni;
+    sombra.mesh.visible = !esCartucheraIni;
     scene.add(maniqui.grupo);
 
     const nivelDetalleIni = calcularNivelDetalleViewport(widthIni);
@@ -320,10 +409,33 @@ export default function Garment3DPreview({
     const prendaIni = construirMallaPrenda(perfilIni, configRef.current, {
       nivelDetalle: nivelDetalleIni,
       materialPrincipal: repoMateriales.obtenerMaterial(aparienciaRef.current),
-      materialForroOVista: repoMateriales.obtenerMaterialVista(aparienciaRef.current),
+      materialSecundario: repoMateriales.obtenerMaterialSecundario(
+        aparienciaRef.current
+      ),
+      materialForroOVista: repoMateriales.obtenerMaterialVista(
+        aparienciaRef.current
+      ),
       mostrarCosturas: aparienciaRef.current.mostrarCosturas,
       ajusteTelaStretchM: PROPIEDADES_FISICAS_TELA[telaIni].ajusteStretchM,
     });
+    prendaIni.grupoCintasMetricas.visible = Boolean(
+      aparienciaRef.current.mostrarCosturas ||
+        aparienciaRef.current.mostrarMapaCalce
+    );
+    aplicarMapaCalceEnPrenda(
+      prendaIni.grupo,
+      perfilIni,
+      repoMateriales.obtenerMaterialMapaCalce(),
+      Boolean(aparienciaRef.current.mostrarMapaCalce)
+    );
+    if (!aparienciaRef.current.mostrarMapaCalce) {
+      aplicarResaltadoPieza(
+        prendaIni.grupo,
+        activePieceIdRef.current,
+        repoMateriales.obtenerMaterialResaltado(aparienciaRef.current),
+        false
+      );
+    }
     const buildMs = Math.round(performance.now() - t0);
     scene.add(prendaIni.grupo);
     setTriangulosUI(prendaIni.triangulosTotales);
@@ -361,8 +473,50 @@ export default function Garment3DPreview({
       nivelDetalleActual: nivelDetalleIni,
       configActual: configRef.current,
       medidasActual: medidasRef.current,
+      poseActual: poseIni,
     };
     motorRef.current = motor;
+
+    const raycaster = new THREE.Raycaster();
+    const pointerNdc = new THREE.Vector2();
+    let pointerDownX = 0;
+    let pointerDownY = 0;
+    const onPointerDownCanvas = (ev: PointerEvent) => {
+      pointerDownX = ev.clientX;
+      pointerDownY = ev.clientY;
+    };
+    const onPointerUpCanvas = (ev: PointerEvent) => {
+      const fn = onActivePieceIdChangeRef.current;
+      const piezas = patternPiecesRef.current;
+      if (!fn || !piezas || piezas.length === 0) return;
+      if (Math.hypot(ev.clientX - pointerDownX, ev.clientY - pointerDownY) > 6) {
+        return;
+      }
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      pointerNdc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+      pointerNdc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointerNdc, camera);
+
+      const objetivos = motor.prendaActual.grupo.children.filter(
+        (c) =>
+          c !== motor.prendaActual.grupoCosturas &&
+          c !== motor.prendaActual.grupoCintasMetricas
+      );
+      const hits = raycaster.intersectObjects(objetivos, true);
+      const hitConZona = hits.find((h) => Boolean(h.object.userData?.zonaPieza));
+      if (!hitConZona) return;
+
+      const zona = hitConZona.object.userData.zonaPieza as ZonaPieza3D;
+      const thetaClick = Math.atan2(hitConZona.point.x, hitConZona.point.z);
+      const resuelto = buscarPieceIdPorZona3D(zona, piezas, thetaClick);
+      if (resuelto) {
+        fn(activePieceIdRef.current === resuelto ? "all" : resuelto);
+      }
+    };
+    renderer.domElement.addEventListener("pointerdown", onPointerDownCanvas);
+    renderer.domElement.addEventListener("pointerup", onPointerUpCanvas);
 
     const onControlStart = () => {
       transicionRef.current = null;
@@ -408,6 +562,9 @@ export default function Garment3DPreview({
         const nueva = construirMallaPrenda(motor.perfilActual, motor.configActual, {
           nivelDetalle: nuevoDetalle,
           materialPrincipal: motor.repoMateriales.obtenerMaterial(aparienciaRef.current),
+          materialSecundario: motor.repoMateriales.obtenerMaterialSecundario(
+            aparienciaRef.current
+          ),
           materialForroOVista: motor.repoMateriales.obtenerMaterialVista(
             aparienciaRef.current
           ),
@@ -415,6 +572,24 @@ export default function Garment3DPreview({
           ajusteTelaStretchM:
             PROPIEDADES_FISICAS_TELA[aparienciaRef.current.tela].ajusteStretchM,
         });
+        nueva.grupoCintasMetricas.visible = Boolean(
+          aparienciaRef.current.mostrarCosturas ||
+            aparienciaRef.current.mostrarMapaCalce
+        );
+        aplicarMapaCalceEnPrenda(
+          nueva.grupo,
+          motor.perfilActual,
+          motor.repoMateriales.obtenerMaterialMapaCalce(),
+          Boolean(aparienciaRef.current.mostrarMapaCalce)
+        );
+        if (!aparienciaRef.current.mostrarMapaCalce) {
+          aplicarResaltadoPieza(
+            nueva.grupo,
+            activePieceIdRef.current,
+            motor.repoMateriales.obtenerMaterialResaltado(aparienciaRef.current),
+            false
+          );
+        }
         motor.scene.add(nueva.grupo);
         motor.prendaActual = nueva;
         setTriangulosUI(nueva.triangulosTotales);
@@ -504,12 +679,21 @@ export default function Garment3DPreview({
       necesitaRenderRef.current = false;
       renderer.render(scene, camera);
 
-      // Proyectar etiquetas 3D -> HTML solo cuando "Ver Costuras" está activo
-      if (aparienciaRef.current.mostrarCosturas) {
+      // Proyectar etiquetas 3D -> HTML cuando "Ver Costuras" o "Mapa de Calce" están activos
+      const mostrarEtiquetas = Boolean(
+        aparienciaRef.current.mostrarCosturas ||
+          aparienciaRef.current.mostrarMapaCalce
+      );
+      if (mostrarEtiquetas) {
         const wPx = renderer.domElement.clientWidth || widthIni;
         const hPx = renderer.domElement.clientHeight || heightIni;
+        const etiquetasObjetivo = aparienciaRef.current.mostrarCosturas
+          ? motor.prendaActual.etiquetas
+          : motor.prendaActual.etiquetas.filter((e) =>
+              e.id.startsWith("lbl-medida-")
+            );
         const proyectadas = proyectarEtiquetas3D(
-          motor.prendaActual.etiquetas,
+          etiquetasObjetivo,
           motor.prendaActual.grupo,
           camera,
           wPx,
@@ -547,6 +731,8 @@ export default function Garment3DPreview({
       controls.removeEventListener("change", onControlChange);
       controls.dispose();
 
+      renderer.domElement.removeEventListener("pointerdown", onPointerDownCanvas);
+      renderer.domElement.removeEventListener("pointerup", onPointerUpCanvas);
       renderer.domElement.removeEventListener("webglcontextlost", onContextLost);
       renderer.domElement.removeEventListener("webglcontextrestored", onContextRestored);
 
@@ -569,19 +755,84 @@ export default function Garment3DPreview({
     };
   }, [reinitTick, solicitarRender]);
 
-  // Actualización INSTANTÁNEA de material, textura y toggle de costuras (0 reconstrucción de geometría)
+  // Actualización INSTANTÁNEA de material, textura, calce, maniquí y toggle de costuras
   useEffect(() => {
     const motor = motorRef.current;
     if (!motor) return;
 
     motor.repoMateriales.obtenerMaterial(apariencia);
+    motor.repoMateriales.obtenerMaterialSecundario(apariencia);
     motor.repoMateriales.obtenerMaterialVista(apariencia);
+    motor.repoMateriales.obtenerMaterialResaltado(apariencia);
+    motor.maniqui.aplicarAcabado(apariencia.acabadoManiqui ?? "lino");
+    motor.maniqui.mostrarCintasGuia(
+      Boolean(apariencia.mostrarCosturas || apariencia.mostrarMapaCalce)
+    );
     motor.prendaActual.grupoCosturas.visible = apariencia.mostrarCosturas;
+    motor.prendaActual.grupoCintasMetricas.visible = Boolean(
+      apariencia.mostrarCosturas || apariencia.mostrarMapaCalce
+    );
+
+    aplicarMapaCalceEnPrenda(
+      motor.prendaActual.grupo,
+      motor.perfilActual,
+      motor.repoMateriales.obtenerMaterialMapaCalce(),
+      Boolean(apariencia.mostrarMapaCalce)
+    );
+    if (!apariencia.mostrarMapaCalce) {
+      aplicarResaltadoPieza(
+        motor.prendaActual.grupo,
+        activePieceIdRef.current,
+        motor.repoMateriales.obtenerMaterialResaltado(apariencia),
+        false
+      );
+    }
+
     ultimaProyeccionStrRef.current = "__dirty__";
     solicitarRender(true);
   }, [apariencia, solicitarRender]);
 
-  // Actualización con debounce ~120 ms cuando cambian medidas o configuración de la prenda
+  // Sincronización 2D -> 3D al seleccionar una pieza activa del molde
+  useEffect(() => {
+    const motor = motorRef.current;
+    if (!motor) return;
+
+    aplicarResaltadoPieza(
+      motor.prendaActual.grupo,
+      activePieceId,
+      motor.repoMateriales.obtenerMaterialResaltado(aparienciaRef.current),
+      Boolean(aparienciaRef.current.mostrarMapaCalce)
+    );
+
+    const zona = activePieceId ? mapearPieceIdAZona3D(activePieceId) : null;
+    if (
+      zona === "espalda" ||
+      zona === "cuello_vista" ||
+      zona === "sombrero" ||
+      zona === "cartuchera"
+    ) {
+      const presetDestino: VistaCamaraPreset =
+        zona === "espalda" ? "espalda" : "detalle";
+      const destino = calcularPoseCamaraPreset(
+        presetDestino,
+        motor.perfilActual,
+        motor.configActual,
+        motor.camera.aspect
+      );
+      transicionRef.current = {
+        inicioMs: performance.now(),
+        duracionMs: DURACION_TRANSICION_CAMARA_MS,
+        posInicio: motor.camera.position.clone(),
+        posFin: destino.posicion,
+        targetInicio: motor.controls.target.clone(),
+        targetFin: destino.target,
+      };
+    }
+
+    solicitarRender(false);
+  }, [activePieceId, solicitarRender]);
+
+  // Actualización con debounce ~120 ms cuando cambian medidas, configuración o pose del maniquí
   useEffect(() => {
     const motor = motorRef.current;
     if (!motor) return;
@@ -595,16 +846,28 @@ export default function Garment3DPreview({
       if (!m) return;
 
       const t0 = performance.now();
-      const medidasCambiaron =
-        JSON.stringify(m.medidasActual) !== JSON.stringify(medidas);
+      const poseSolicitada: PoseManiquiTipo =
+        aparienciaRef.current.poseManiqui ?? "relajada";
+      const medidasOPoseCambiaron =
+        JSON.stringify(m.medidasActual) !== JSON.stringify(medidas) ||
+        m.poseActual !== poseSolicitada;
 
-      const perfil = medidasCambiaron ? getBodyProfile(medidas) : m.perfilActual;
-      if (medidasCambiaron) {
+      const perfil = medidasOPoseCambiaron
+        ? getBodyProfile(medidas, POSES_MANIQUI_3D[poseSolicitada])
+        : m.perfilActual;
+      if (medidasOPoseCambiaron) {
         m.maniqui.actualizar(perfil);
         actualizarLimitesOrbitControls(m.controls, perfil);
         m.perfilActual = perfil;
         m.medidasActual = medidas;
+        m.poseActual = poseSolicitada;
       }
+
+      const eraCartuchera =
+        m.configActual.subEstiloEspecial === "zipper_pouch";
+      const esCartuchera = config.subEstiloEspecial === "zipper_pouch";
+      m.maniqui.grupo.visible = !esCartuchera;
+      m.sombra.mesh.visible = !esCartuchera;
 
       const previa = m.prendaActual;
       m.scene.remove(previa.grupo);
@@ -617,13 +880,47 @@ export default function Garment3DPreview({
       const nueva = construirMallaPrenda(perfil, config, {
         nivelDetalle: m.nivelDetalleActual,
         materialPrincipal: m.repoMateriales.obtenerMaterial(ap),
+        materialSecundario: m.repoMateriales.obtenerMaterialSecundario(ap),
         materialForroOVista: m.repoMateriales.obtenerMaterialVista(ap),
         mostrarCosturas: ap.mostrarCosturas,
         ajusteTelaStretchM: PROPIEDADES_FISICAS_TELA[ap.tela].ajusteStretchM,
       });
+      m.maniqui.mostrarCintasGuia(
+        Boolean(ap.mostrarCosturas || ap.mostrarMapaCalce)
+      );
+      nueva.grupoCintasMetricas.visible = Boolean(
+        ap.mostrarCosturas || ap.mostrarMapaCalce
+      );
+      aplicarMapaCalceEnPrenda(
+        nueva.grupo,
+        perfil,
+        m.repoMateriales.obtenerMaterialMapaCalce(),
+        Boolean(ap.mostrarMapaCalce)
+      );
+      if (!ap.mostrarMapaCalce) {
+        aplicarResaltadoPieza(
+          nueva.grupo,
+          activePieceIdRef.current,
+          m.repoMateriales.obtenerMaterialResaltado(ap),
+          false
+        );
+      }
+
       m.scene.add(nueva.grupo);
       m.prendaActual = nueva;
       m.configActual = config;
+
+      if (eraCartuchera !== esCartuchera) {
+        const destino = calcularPoseCamaraPreset(
+          "frente",
+          perfil,
+          config,
+          m.camera.aspect
+        );
+        m.camera.position.copy(destino.posicion);
+        m.controls.target.copy(destino.target);
+        m.controls.update();
+      }
 
       const elapsed = Math.round(performance.now() - t0);
       setTriangulosUI(nueva.triangulosTotales);
@@ -638,7 +935,7 @@ export default function Garment3DPreview({
         debounceTimerRef.current = null;
       }
     };
-  }, [medidas, config, solicitarRender]);
+  }, [medidas, config, apariencia.poseManiqui, solicitarRender]);
 
   const irAVistaCamara = useCallback(
     (preset: VistaCamaraPreset) => {
@@ -674,6 +971,115 @@ export default function Garment3DPreview({
       ],
       []
     );
+
+  const piezaActivaObj = useMemo(
+    () =>
+      activePieceId && activePieceId !== "all"
+        ? patternPieces?.find((p) => p.id === activePieceId) ?? null
+        : null,
+    [activePieceId, patternPieces]
+  );
+
+  const capturarFotoEstudio3D = useCallback(() => {
+    const m = motorRef.current;
+    if (!m || typeof document === "undefined") return;
+
+    m.renderer.render(m.scene, m.camera);
+    const glCanvas = m.renderer.domElement;
+    if (glCanvas.width === 0 || glCanvas.height === 0) return;
+
+    const outW = 1080;
+    const outH = 1350;
+    const cardH = 210;
+    const drawAreaH = outH - cardH;
+
+    const outCanvas = document.createElement("canvas");
+    outCanvas.width = outW;
+    outCanvas.height = outH;
+    const ctx = outCanvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.fillStyle = PALETA_UI_3D.crema;
+    ctx.fillRect(0, 0, outW, outH);
+
+    // Encuadre proporcional del lienzo 3D en el área superior
+    const scale = Math.min(outW / glCanvas.width, drawAreaH / glCanvas.height);
+    const dw = glCanvas.width * scale;
+    const dh = glCanvas.height * scale;
+    const dx = (outW - dw) * 0.5;
+    const dy = (drawAreaH - dh) * 0.5;
+    ctx.drawImage(glCanvas, dx, dy, dw, dh);
+
+    // Pie de ficha técnica de taller
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, drawAreaH, outW, cardH);
+    ctx.fillStyle = "#E2D6C8";
+    ctx.fillRect(0, drawAreaH, outW, 2);
+
+    // Muestras de color de tela
+    ctx.beginPath();
+    ctx.arc(72, drawAreaH + 86, 26, 0, Math.PI * 2);
+    ctx.fillStyle = aparienciaRef.current.color;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#D8CEC0";
+    ctx.stroke();
+
+    if (
+      configRef.current.esDosPiezas &&
+      aparienciaRef.current.colorSecundario
+    ) {
+      ctx.beginPath();
+      ctx.arc(106, drawAreaH + 96, 18, 0, Math.PI * 2);
+      ctx.fillStyle = aparienciaRef.current.colorSecundario;
+      ctx.fill();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = "#FFFFFF";
+      ctx.stroke();
+    }
+
+    const nombrePrenda =
+      configRef.current.esDosPiezas
+        ? "Conjunto 2 Piezas"
+        : NOMBRES_PRENDA_UI[configRef.current.prenda] ?? "Prenda a Medida";
+    const infoTela = PROPIEDADES_FISICAS_TELA[aparienciaRef.current.tela].etiquetaCorta;
+    const tituloX =
+      configRef.current.esDosPiezas && aparienciaRef.current.colorSecundario
+        ? 146
+        : 122;
+
+    ctx.fillStyle = "#2D2A26";
+    ctx.font = "bold 34px sans-serif";
+    ctx.fillText(
+      `${nombrePrenda} • ${infoTela}`,
+      tituloX,
+      drawAreaH + 80
+    );
+
+    ctx.fillStyle = "#5C554E";
+    ctx.font = "600 24px sans-serif";
+    ctx.fillText(
+      `Busto ${medidasRef.current.busto} cm  •  Cintura ${medidasRef.current.cintura} cm  •  Cadera ${medidasRef.current.cadera} cm  •  Largo ${configRef.current.largoDeseado} cm`,
+      tituloX,
+      drawAreaH + 124
+    );
+
+    ctx.fillStyle = "#3B7A57";
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillText(
+      "MoldeFácil — Estudio 3D a Medida",
+      tituloX,
+      drawAreaH + 170
+    );
+
+    const url = outCanvas.toDataURL("image/png");
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "moldefacil-vista-3d.png";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, []);
 
   if (webglError) {
     return (
@@ -761,17 +1167,76 @@ export default function Garment3DPreview({
           })}
         </div>
 
-        {/* Badge sutil de medidas sincronizadas */}
-        <div className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-[#E2D6C8] bg-[#FAF6F0]/90 px-3 py-2 text-[11px] font-semibold text-[#4D443D] backdrop-blur-sm">
-          <User className="w-3.5 h-3.5 text-[#C85A32]" />
-          <span>
-            {medidas.busto} / {medidas.cintura} / {medidas.cadera} cm
-          </span>
+        {/* Badge de medidas y botón Foto 3D */}
+        <div className="flex items-center gap-1.5 pointer-events-auto">
+          <div className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-[#E2D6C8] bg-[#FAF6F0]/90 px-3 py-2 text-[11px] font-semibold text-[#4D443D] backdrop-blur-sm">
+            <User className="w-3.5 h-3.5 text-[#C85A32]" />
+            <span>
+              {medidas.busto} / {medidas.cintura} / {medidas.cadera} cm
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={capturarFotoEstudio3D}
+            aria-label="Capturar foto 3D"
+            title="Descargar imagen PNG de ficha 3D"
+            className="min-h-[44px] min-w-[44px] px-3 rounded-xl border border-[#E2D6C8] bg-[#FAF6F0]/95 hover:bg-white text-xs font-extrabold text-[#2D2A26] shadow-sm backdrop-blur-sm flex items-center gap-1.5 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57]"
+          >
+            <Camera className="w-4 h-4 text-[#C85A32] shrink-0" />
+            <span className="hidden sm:inline">Foto 3D</span>
+          </button>
         </div>
       </div>
 
-      {/* Etiquetas educativas HTML proyectadas desde mundo 3D (ocultas detrás del maniquí) */}
-      {apariencia.mostrarCosturas && (
+      {/* Chip de pieza activa sincronizada 2D <-> 3D + Leyenda Mapa de Calce */}
+      {(piezaActivaObj || apariencia.mostrarMapaCalce) && (
+        <div className="absolute top-[66px] left-3 right-3 z-20 flex flex-wrap items-start justify-between gap-2 pointer-events-none">
+          {piezaActivaObj ? (
+            <div className="inline-flex items-center gap-2 rounded-xl border border-[#C85A32]/50 bg-[#FAF6F0]/95 px-3 py-1.5 text-xs font-bold text-[#2D2A26] shadow-sm backdrop-blur-sm pointer-events-auto">
+              <span>
+                Pieza: {piezaActivaObj.tabLabel} ({piezaActivaObj.widthCm.toFixed(0)} ×{" "}
+                {piezaActivaObj.heightCm.toFixed(0)} cm)
+              </span>
+              {onActivePieceIdChange && (
+                <button
+                  type="button"
+                  onClick={() => onActivePieceIdChange("all")}
+                  aria-label="Ver todas las piezas"
+                  className="inline-flex items-center gap-0.5 rounded-lg bg-[#EFE6DA] hover:bg-[#E2D6C8] px-2 py-0.5 text-[11px] font-extrabold text-[#3D352E] cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                  Ver todo
+                </button>
+              )}
+            </div>
+          ) : (
+            <span />
+          )}
+
+          {apariencia.mostrarMapaCalce && (
+            <div
+              data-leyenda-calce-3d
+              className="inline-flex flex-wrap items-center gap-2.5 rounded-xl border border-[#E2D6C8] bg-[#FAF6F0]/95 px-3 py-1.5 text-[11px] font-bold text-[#2D2A26] shadow-sm backdrop-blur-sm pointer-events-auto"
+            >
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#D96B43]" />
+                Ceñido (&lt;2.5 cm)
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#3B7A57]" />
+                Cómodo (2.5–8.5 cm)
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#3B6E8C]" />
+                Holgado (&gt;8.5 cm)
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Etiquetas educativas y cintas métricas HTML proyectadas desde mundo 3D */}
+      {(apariencia.mostrarCosturas || apariencia.mostrarMapaCalce) && (
         <div
           className="absolute inset-0 z-10 pointer-events-none overflow-hidden"
           aria-hidden="true"
@@ -804,56 +1269,130 @@ export default function Garment3DPreview({
         data-barra-flotante-3d
         className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 w-[calc(100%-24px)] max-w-xl flex flex-col items-center pointer-events-none"
       >
-        {/* Popover de Color */}
+        {/* Popover de Color (con fila inferior opcional en conjuntos de 2 piezas) */}
         {popoverAbierto === "color" && (
           <div
             role="dialog"
             aria-label="Selector de color de tela"
-            className="mb-2 w-full max-w-sm rounded-2xl border border-[#E2D6C8] bg-[#FAF6F0]/96 p-3 shadow-xl backdrop-blur-md pointer-events-auto"
+            className="mb-2 w-full max-w-sm rounded-2xl border border-[#E2D6C8] bg-[#FAF6F0]/96 p-3 shadow-xl backdrop-blur-md pointer-events-auto space-y-3"
           >
-            <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#6B625A] mb-2">
-              Color de la tela
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              {COLORES_RAPIDOS.map((c) => {
-                const seleccionado =
-                  apariencia.color.toUpperCase() === c.hex.toUpperCase();
-                return (
-                  <button
-                    key={c.hex}
-                    type="button"
-                    title={c.nombre}
-                    aria-label={`Color ${c.nombre}`}
-                    aria-pressed={seleccionado}
-                    onClick={() =>
-                      onAparienciaChange({ ...apariencia, color: c.hex })
-                    }
-                    className={`w-11 h-11 rounded-full border-2 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] ${
-                      seleccionado
-                        ? "scale-110 ring-2 ring-[#3B7A57] border-white shadow-md"
-                        : "border-[#D8CEC0] hover:scale-105"
-                    }`}
-                    style={{ backgroundColor: c.hex }}
-                  />
-                );
-              })}
+            <div>
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#6B625A] mb-2">
+                {config.esDosPiezas
+                  ? "Color superior (Top / Chaqueta)"
+                  : "Color de la tela"}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {COLORES_RAPIDOS.map((c) => {
+                  const seleccionado =
+                    apariencia.color.toUpperCase() === c.hex.toUpperCase();
+                  return (
+                    <button
+                      key={c.hex}
+                      type="button"
+                      title={c.nombre}
+                      aria-label={`Color ${c.nombre}`}
+                      aria-pressed={seleccionado}
+                      onClick={() =>
+                        onAparienciaChange({ ...apariencia, color: c.hex })
+                      }
+                      className={`w-11 h-11 rounded-full border-2 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] ${
+                        seleccionado
+                          ? "scale-110 ring-2 ring-[#3B7A57] border-white shadow-md"
+                          : "border-[#D8CEC0] hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: c.hex }}
+                    />
+                  );
+                })}
 
-              <label
-                title="Elegir color personalizado"
-                className="relative w-11 h-11 rounded-full border-2 border-dashed border-[#B5A898] flex items-center justify-center cursor-pointer bg-white hover:bg-[#F3ECE2] text-[10px] font-bold text-[#4D443D]"
-              >
-                <span>Más</span>
-                <input
-                  type="color"
-                  aria-label="Elegir color personalizado"
-                  value={apariencia.color}
-                  onChange={(e) =>
-                    onAparienciaChange({ ...apariencia, color: e.target.value })
-                  }
-                  className="sr-only"
-                />
-              </label>
+                <label
+                  title="Elegir color personalizado"
+                  className="relative w-11 h-11 rounded-full border-2 border-dashed border-[#B5A898] flex items-center justify-center cursor-pointer bg-white hover:bg-[#F3ECE2] text-[10px] font-bold text-[#4D443D]"
+                >
+                  <span>Más</span>
+                  <input
+                    type="color"
+                    aria-label="Elegir color personalizado"
+                    value={apariencia.color}
+                    onChange={(e) =>
+                      onAparienciaChange({ ...apariencia, color: e.target.value })
+                    }
+                    className="sr-only"
+                  />
+                </label>
+              </div>
             </div>
+
+            {config.esDosPiezas && (
+              <div className="pt-2 border-t border-[#E2D6C8]">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#6B625A]">
+                    Color inferior (Falda / Pantalón)
+                  </p>
+                  {apariencia.colorSecundario && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onAparienciaChange({
+                          ...apariencia,
+                          colorSecundario: undefined,
+                        })
+                      }
+                      className="text-[10px] font-bold text-[#C85A32] hover:underline cursor-pointer"
+                    >
+                      Igual al superior
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {COLORES_RAPIDOS.map((c) => {
+                    const colorInf = apariencia.colorSecundario ?? apariencia.color;
+                    const seleccionado =
+                      colorInf.toUpperCase() === c.hex.toUpperCase();
+                    return (
+                      <button
+                        key={`sec-${c.hex}`}
+                        type="button"
+                        title={`Inferior: ${c.nombre}`}
+                        aria-label={`Color inferior ${c.nombre}`}
+                        aria-pressed={seleccionado}
+                        onClick={() =>
+                          onAparienciaChange({
+                            ...apariencia,
+                            colorSecundario: c.hex,
+                          })
+                        }
+                        className={`w-9 h-9 rounded-full border-2 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] ${
+                          seleccionado
+                            ? "scale-110 ring-2 ring-[#3B7A57] border-white shadow-sm"
+                            : "border-[#D8CEC0] hover:scale-105"
+                        }`}
+                        style={{ backgroundColor: c.hex }}
+                      />
+                    );
+                  })}
+                  <label
+                    title="Color inferior personalizado"
+                    className="relative w-9 h-9 rounded-full border-2 border-dashed border-[#B5A898] flex items-center justify-center cursor-pointer bg-white hover:bg-[#F3ECE2] text-[10px] font-bold text-[#4D443D]"
+                  >
+                    <span>+</span>
+                    <input
+                      type="color"
+                      aria-label="Color inferior personalizado"
+                      value={apariencia.colorSecundario ?? apariencia.color}
+                      onChange={(e) =>
+                        onAparienciaChange({
+                          ...apariencia,
+                          colorSecundario: e.target.value,
+                        })
+                      }
+                      className="sr-only"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -929,6 +1468,85 @@ export default function Garment3DPreview({
           </div>
         )}
 
+        {/* Popover de Estudio: Pose + Acabado de Maniquí */}
+        {popoverAbierto === "estudio" && (
+          <div
+            role="dialog"
+            aria-label="Opciones de pose y maniquí"
+            className="mb-2 w-full max-w-sm rounded-2xl border border-[#E2D6C8] bg-[#FAF6F0]/96 p-3 shadow-xl backdrop-blur-md pointer-events-auto space-y-3"
+          >
+            <div>
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#6B625A] mb-2">
+                Pose anatómica del maniquí
+              </p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {OPCIONES_POSES.map((p) => {
+                  const activa =
+                    (apariencia.poseManiqui ?? "relajada") === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      aria-pressed={activa}
+                      onClick={() =>
+                        onAparienciaChange({ ...apariencia, poseManiqui: p.id })
+                      }
+                      className={`min-h-[44px] px-2 py-1.5 rounded-xl border text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] ${
+                        activa
+                          ? "border-[#C85A32] bg-[#C85A32]/12 text-[#2D2A26]"
+                          : "border-[#E2D6C8] bg-white/80 hover:bg-white text-[#4D443D]"
+                      }`}
+                    >
+                      <div className="text-xs font-extrabold">{p.nombre}</div>
+                      <div className="text-[10px] text-[#6B625A] leading-tight">
+                        {p.desc}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-[#E2D6C8]">
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#6B625A] mb-2">
+                Acabado del maniquí
+              </p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {OPCIONES_MANIQUI.map((m) => {
+                  const activo =
+                    (apariencia.acabadoManiqui ?? "lino") === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      aria-pressed={activo}
+                      onClick={() =>
+                        onAparienciaChange({
+                          ...apariencia,
+                          acabadoManiqui: m.id,
+                        })
+                      }
+                      className={`min-h-[44px] px-2 py-1.5 rounded-xl border flex items-center gap-1.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] ${
+                        activo
+                          ? "border-[#C85A32] bg-[#C85A32]/12 text-[#2D2A26]"
+                          : "border-[#E2D6C8] bg-white/80 hover:bg-white text-[#4D443D]"
+                      }`}
+                    >
+                      <span
+                        className="w-4 h-4 rounded-full border border-[#B5A898] shrink-0"
+                        style={{ backgroundColor: m.color }}
+                      />
+                      <span className="text-[11px] font-extrabold leading-tight">
+                        {m.nombre}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Fila principal de controles */}
         <div
           className="inline-flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-[#E2D6C8] bg-[#FAF6F0]/94 px-2 py-1.5 shadow-lg backdrop-blur-md pointer-events-auto"
@@ -994,6 +1612,45 @@ export default function Garment3DPreview({
               <Layers className="w-4 h-4 shrink-0 text-[#C85A32]" />
             )}
             <span>Tela</span>
+          </button>
+
+          {/* Estudio (Pose + Maniquí) */}
+          <button
+            type="button"
+            aria-expanded={popoverAbierto === "estudio"}
+            aria-label="Estudio"
+            onClick={() =>
+              setPopoverAbierto((p) => (p === "estudio" ? null : "estudio"))
+            }
+            className={`min-h-[44px] min-w-[44px] px-2.5 sm:px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] ${
+              popoverAbierto === "estudio"
+                ? "bg-[#EFE6DA] text-[#2D2A26]"
+                : "text-[#3D352E] hover:bg-[#EFE6DA]"
+            }`}
+          >
+            <Sliders className="w-4 h-4 shrink-0 text-[#C85A32]" />
+            <span>Estudio</span>
+          </button>
+
+          {/* Mapa de Calce / Holgura */}
+          <button
+            type="button"
+            aria-pressed={Boolean(apariencia.mostrarMapaCalce)}
+            aria-label="Calce"
+            onClick={() =>
+              onAparienciaChange({
+                ...apariencia,
+                mostrarMapaCalce: !apariencia.mostrarMapaCalce,
+              })
+            }
+            className={`min-h-[44px] min-w-[44px] px-2.5 sm:px-3 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B6E8C] ${
+              apariencia.mostrarMapaCalce
+                ? "text-white shadow-sm bg-[#3B6E8C]"
+                : "text-[#3D352E] hover:bg-[#EFE6DA]"
+            }`}
+          >
+            <Activity className="w-4 h-4 shrink-0" />
+            <span>Calce</span>
           </button>
 
           {/* Ver Costuras y Pinzas (#3B7A57 salvia cuando activo) */}
