@@ -66,8 +66,33 @@ import PublishCreationModal from "./PublishCreationModal";
 import PostDetailModal from "./PostDetailModal";
 import QuestionsSection from "./QuestionsSection";
 import ProfileAndModerationSection from "./ProfileAndModerationSection";
+import PwaOfflineStatusBar from "./PwaOfflineStatusBar";
+import FitFeedbackAndAdjustments from "./FitFeedbackAndAdjustments";
+import ProjectLogSection from "./ProjectLogSection";
+import DirectoryAndCommissionsSection from "./DirectoryAndCommissionsSection";
+import CirclesAndMentorshipSection from "./CirclesAndMentorshipSection";
+import PathsGlossaryAndSuppliersSection from "./PathsGlossaryAndSuppliersSection";
+import {
+  getAmpliacionServerSnapshot,
+  loadAmpliacionEstado,
+  saveAmpliacionEstado,
+  subscribeAmpliacion,
+} from "@/lib/community/expansionStore";
+import type { EstadoAmpliacionComunidad } from "@/lib/community/expansionTypes";
+import { type ElementoColaOffline } from "@/lib/community/offlineQueue";
+import { crearPreguntaComunidad } from "@/lib/community/communityStore";
 
-type TabComunidad = "galeria" | "preguntas" | "retos" | "recursos" | "perfil";
+type TabComunidad =
+  | "galeria"
+  | "preguntas"
+  | "bitacoras"
+  | "calce"
+  | "encargos"
+  | "circulos"
+  | "rutas"
+  | "retos"
+  | "recursos"
+  | "perfil";
 
 function CommunityQuerySync({
   onSolicitarPublicar,
@@ -91,6 +116,11 @@ function CommunityQuerySync({
       if (
         tab === "galeria" ||
         tab === "preguntas" ||
+        tab === "bitacoras" ||
+        tab === "calce" ||
+        tab === "encargos" ||
+        tab === "circulos" ||
+        tab === "rutas" ||
         tab === "retos" ||
         tab === "recursos" ||
         tab === "perfil"
@@ -112,6 +142,11 @@ export default function CommunityHubClient() {
     subscribeComunidad,
     loadComunidadEstado,
     getComunidadServerSnapshot
+  );
+  const ampliacion = useSyncExternalStore(
+    subscribeAmpliacion,
+    loadAmpliacionEstado,
+    getAmpliacionServerSnapshot
   );
 
   const actor = useMemo(() => obtenerActorActivo(estado), [estado]);
@@ -139,6 +174,9 @@ export default function CommunityHubClient() {
   const [filtroPrenda, setFiltroPrenda] = useState<string>("Todas");
   const [filtroTela, setFiltroTela] = useState<string>("Todas");
   const [filtroDificultad, setFiltroDificultad] = useState<string>("Todas");
+  const [filtroTipo, setFiltroTipo] = useState<
+    "Todas" | "molde_plataforma" | "moda_real"
+  >("Todas");
   const [soloPorEncargo, setSoloPorEncargo] = useState<boolean>(false);
   const [ordenGaleria, setOrdenGaleria] = useState<"recientes" | "utiles">(
     "recientes"
@@ -199,6 +237,12 @@ export default function CommunityHubClient() {
       }
       if (filtroPrenda !== "Todas" && pub.prenda !== filtroPrenda) return false;
       if (filtroTela !== "Todas" && pub.tela !== filtroTela) return false;
+      if (
+        filtroTipo !== "Todas" &&
+        (pub.tipo_publicacion ?? "molde_plataforma") !== filtroTipo
+      ) {
+        return false;
+      }
       if (filtroDificultad === "facil" && pub.dificultad > 2) return false;
       if (filtroDificultad === "media" && pub.dificultad !== 3) return false;
       if (filtroDificultad === "retadora" && pub.dificultad < 4) return false;
@@ -234,13 +278,18 @@ export default function CommunityHubClient() {
     filtroDificultad,
     filtroPrenda,
     filtroTela,
+    filtroTipo,
     ordenGaleria,
     soloPorEncargo,
   ]);
 
+  const limiteEfectivo = ampliacion.modoAhorroDatosManual
+    ? Math.min(limiteCursor, 4)
+    : limiteCursor;
+
   const publicacionesMostradas = useMemo(
-    () => publicacionesFiltradas.slice(0, limiteCursor),
-    [limiteCursor, publicacionesFiltradas]
+    () => publicacionesFiltradas.slice(0, limiteEfectivo),
+    [limiteEfectivo, publicacionesFiltradas]
   );
 
   const publicacionSeleccionada: PublicacionComunidad | null = useMemo(() => {
@@ -269,6 +318,28 @@ export default function CommunityHubClient() {
       label: "Pregúntale a la modista",
       badge: estado.preguntas.filter((q) => !q.oculto).length,
     },
+    ...(ampliacion.featureFlags.projectLogs
+      ? [
+          {
+            id: "bitacoras" as const,
+            label: "Bitácoras",
+            badge: ampliacion.bitacoras.length,
+          },
+        ]
+      : []),
+    ...(ampliacion.featureFlags.fitFeedback || ampliacion.featureFlags.adjustmentsLibrary
+      ? [{ id: "calce" as const, label: "Calce y Ajustes" }]
+      : []),
+    ...(ampliacion.featureFlags.seamstressPortfolio || ampliacion.featureFlags.commissions
+      ? [{ id: "encargos" as const, label: "Encargos y Modistas" }]
+      : []),
+    ...(ampliacion.featureFlags.circles || ampliacion.featureFlags.mentorship
+      ? [{ id: "circulos" as const, label: "Círculos y Mentoría" }]
+      : []),
+    ...(ampliacion.featureFlags.learningPathsGlossary ||
+    ampliacion.featureFlags.supplierDirectory
+      ? [{ id: "rutas" as const, label: "Rutas, Glosario y Telas" }]
+      : []),
     { id: "retos", label: "Retos e Insignias" },
     { id: "recursos", label: "Recursos PDF", badge: estado.descargables.length },
     {
@@ -279,7 +350,51 @@ export default function CommunityHubClient() {
     },
   ];
 
+  const manejarActualizarAmpliacion = useCallback(
+    (siguiente: EstadoAmpliacionComunidad, mensaje?: string) => {
+      saveAmpliacionEstado(siguiente);
+      if (mensaje) setAvisoGlobal(mensaje);
+    },
+    []
+  );
+
+  const sincronizarElementoCola = useCallback(
+    async (item: ElementoColaOffline): Promise<{ ok: boolean; error?: string }> => {
+      if (item.tipo === "pregunta") {
+        const res = crearPreguntaComunidad(estado, {
+          titulo: String(item.payload.titulo ?? item.titulo),
+          detalle: String(item.payload.detalle ?? "Duda guardada sin conexión."),
+          categoria: "costura_acabados",
+          etiquetas: [],
+        });
+        if (!res.ok) return { ok: false, error: res.error };
+        saveComunidadEstado(res.estado);
+        return { ok: true };
+      }
+      return { ok: true };
+    },
+    [estado]
+  );
+
+  const notificacionesAgrupadasPorDia = useMemo(() => {
+    const mapa = new Map<string, typeof misNotificaciones>();
+    for (const n of misNotificaciones.slice(0, 12)) {
+      const dia = new Date(n.creado_en).toLocaleDateString("es-CO", {
+        day: "numeric",
+        month: "short",
+      });
+      const lista = mapa.get(dia) ?? [];
+      lista.push(n);
+      mapa.set(dia, lista);
+    }
+    return Array.from(mapa.entries());
+  }, [misNotificaciones]);
+
   const abrirMoldeDesdeTarjeta = (pub: PublicacionComunidad) => {
+    if (!pub.config_molde) {
+      setPublicacionDetalleId(pub.id);
+      return;
+    }
     const token = codificarConfigMoldeParaUrl(pub.config_molde);
     saveComunidadEstado(registrarRemixMolde(estado, pub.id));
     router.push(`/?molde_comunidad=${encodeURIComponent(token)}`);
@@ -355,6 +470,14 @@ export default function CommunityHubClient() {
                   ))}
                 </select>
               </label>
+
+              <Link
+                href="/cuenta?volver=/comunidad"
+                className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[#FAF6F0] border border-[#E2D6C8] hover:border-[#3B7A57] text-[#28593D] text-xs font-extrabold inline-flex items-center gap-1.5"
+              >
+                <ShieldCheck className="w-4 h-4 text-[#3B7A57]" />
+                Mi Cuenta segura
+              </Link>
 
               <button
                 type="button"
@@ -484,21 +607,30 @@ export default function CommunityHubClient() {
                 Aún no tienes notificaciones nuevas.
               </p>
             ) : (
-              <ul className="space-y-2">
-                {misNotificaciones.slice(0, 5).map((n) => (
-                  <li
-                    key={n.id}
-                    className={`rounded-xl px-3.5 py-2.5 text-xs border ${
-                      n.leida
-                        ? "bg-white border-[#EFE6DA] text-[#5C554E]"
-                        : "bg-[#FFF6F2] border-[#E6B8A5] text-[#2D2A26] font-semibold"
-                    }`}
-                  >
-                    <p className="font-extrabold">{n.titulo}</p>
-                    <p>{n.mensaje}</p>
-                  </li>
+              <div className="space-y-3">
+                {notificacionesAgrupadasPorDia.map(([dia, lista]) => (
+                  <div key={dia} className="space-y-1.5">
+                    <p className="text-[11px] font-extrabold text-[#5C554E]">
+                      Resumen del {dia} ({lista.length} aviso{lista.length > 1 ? "s" : ""})
+                    </p>
+                    <ul className="space-y-1.5">
+                      {lista.map((n) => (
+                        <li
+                          key={n.id}
+                          className={`rounded-xl px-3.5 py-2.5 text-xs border ${
+                            n.leida
+                              ? "bg-white border-[#EFE6DA] text-[#5C554E]"
+                              : "bg-[#FFF6F2] border-[#E6B8A5] text-[#2D2A26] font-semibold"
+                          }`}
+                        >
+                          <p className="font-extrabold">{n.titulo}</p>
+                          <p>{n.mensaje}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </div>
         )}
@@ -518,6 +650,21 @@ export default function CommunityHubClient() {
             Entendido
           </button>
         </div>
+      )}
+
+      {ampliacion.featureFlags.pwaOffline && (
+        <PwaOfflineStatusBar
+          ahorroDatos={ampliacion.modoAhorroDatosManual}
+          alCambiarAhorroDatos={(activo) =>
+            manejarActualizarAmpliacion(
+              { ...ampliacion, modoAhorroDatosManual: activo },
+              activo
+                ? "Modo ahorro de datos activo: cargamos menos imágenes y posponemos modelos 3D."
+                : "Modo normal de visualización restaurado."
+            )
+          }
+          onSincronizarElemento={sincronizarElementoCola}
+        />
       )}
 
       <nav
@@ -638,6 +785,29 @@ export default function CommunityHubClient() {
               <div className="flex flex-wrap items-center gap-2">
                 {(
                   [
+                    { id: "Todas", label: "Todo tipo" },
+                    { id: "molde_plataforma", label: "Con molde MoldeFácil" },
+                    { id: "moda_real", label: "Moda real" },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setFiltroTipo(t.id)}
+                    className={`min-h-[36px] px-3 rounded-full text-xs font-bold border cursor-pointer ${
+                      filtroTipo === t.id
+                        ? "bg-[#B34720] text-white border-[#B34720]"
+                        : "bg-white text-[#5C554E] border-[#E2D6C8]"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {(
+                  [
                     { id: "Todas", label: "Cualquier dificultad" },
                     { id: "facil", label: "Fácil (1–2)" },
                     { id: "media", label: "Intermedia (3)" },
@@ -719,6 +889,11 @@ export default function CommunityHubClient() {
                               3D vs. Real
                             </span>
                           )}
+                          {pub.tipo_publicacion === "moda_real" && (
+                            <span className="px-2.5 py-1 rounded-full bg-[#2D2A26]/90 text-white text-[11px] font-extrabold shadow-xs">
+                              Moda real
+                            </span>
+                          )}
                         </div>
                       </div>
                     )}
@@ -781,14 +956,24 @@ export default function CommunityHubClient() {
                           >
                             Ver y comentar
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => abrirMoldeDesdeTarjeta(pub)}
-                            className="min-h-[44px] px-3 rounded-xl bg-[#B34720] hover:bg-[#973B1A] text-white text-xs font-extrabold inline-flex items-center justify-center gap-1 cursor-pointer"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            Hacer molde
-                          </button>
+                          {pub.config_molde ? (
+                            <button
+                              type="button"
+                              onClick={() => abrirMoldeDesdeTarjeta(pub)}
+                              className="min-h-[44px] px-3 rounded-xl bg-[#B34720] hover:bg-[#973B1A] text-white text-xs font-extrabold inline-flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                              Hacer molde
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setPublicacionDetalleId(pub.id)}
+                              className="min-h-[44px] px-3 rounded-xl bg-[#3B7A57] hover:bg-[#2E6245] text-white text-xs font-extrabold inline-flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              Ver inspiración
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1066,6 +1251,96 @@ export default function CommunityHubClient() {
           </div>
         </section>
       )}
+
+      {tabActiva === "bitacoras" && ampliacion.featureFlags.projectLogs && (
+        <section
+          role="tabpanel"
+          id="panel-com-bitacoras"
+          aria-labelledby="tab-com-bitacoras"
+        >
+          <ProjectLogSection
+            ampliacion={ampliacion}
+            estadoComunidad={estado}
+            actor={actor}
+            alActualizarAmpliacion={manejarActualizarAmpliacion}
+            alActualizarComunidad={manejarActualizarEstado}
+            onAbrirTabPreguntas={() => setTabActiva("preguntas")}
+          />
+        </section>
+      )}
+
+      {tabActiva === "calce" &&
+        (ampliacion.featureFlags.fitFeedback ||
+          ampliacion.featureFlags.adjustmentsLibrary) && (
+          <section
+            role="tabpanel"
+            id="panel-com-calce"
+            aria-labelledby="tab-com-calce"
+          >
+            <FitFeedbackAndAdjustments
+              ampliacion={ampliacion}
+              actor={actor}
+              alActualizarAmpliacion={manejarActualizarAmpliacion}
+              mostrarCalce={ampliacion.featureFlags.fitFeedback}
+              mostrarAjustes={ampliacion.featureFlags.adjustmentsLibrary}
+            />
+          </section>
+        )}
+
+      {tabActiva === "encargos" &&
+        (ampliacion.featureFlags.seamstressPortfolio ||
+          ampliacion.featureFlags.commissions) && (
+          <section
+            role="tabpanel"
+            id="panel-com-encargos"
+            aria-labelledby="tab-com-encargos"
+          >
+            <DirectoryAndCommissionsSection
+              ampliacion={ampliacion}
+              estadoComunidad={estado}
+              actor={actor}
+              alActualizarAmpliacion={manejarActualizarAmpliacion}
+            />
+          </section>
+        )}
+
+      {tabActiva === "circulos" &&
+        (ampliacion.featureFlags.circles || ampliacion.featureFlags.mentorship) && (
+          <section
+            role="tabpanel"
+            id="panel-com-circulos"
+            aria-labelledby="tab-com-circulos"
+          >
+            <CirclesAndMentorshipSection
+              ampliacion={ampliacion}
+              actor={actor}
+              alActualizarAmpliacion={manejarActualizarAmpliacion}
+            />
+          </section>
+        )}
+
+      {tabActiva === "rutas" &&
+        (ampliacion.featureFlags.learningPathsGlossary ||
+          ampliacion.featureFlags.supplierDirectory) && (
+          <section
+            role="tabpanel"
+            id="panel-com-rutas"
+            aria-labelledby="tab-com-rutas"
+          >
+            <PathsGlossaryAndSuppliersSection
+              ampliacion={ampliacion}
+              actor={actor}
+              creadoCuentaIso={
+                perfilActivo?.creado_en ?? "2026-10-01T10:00:00.000Z"
+              }
+              interaccionesPrevias={
+                (perfilActivo?.publicaciones_aprobadas_count ?? 0) +
+                estado.comentarios.filter((c) => c.autora_id === actor?.id).length
+              }
+              alActualizarAmpliacion={manejarActualizarAmpliacion}
+            />
+          </section>
+        )}
 
       {tabActiva === "perfil" && (
         <section

@@ -78,10 +78,10 @@ export default function NormasComunidadPage() {
             <article className="rounded-2xl bg-[#FAF6F0] border border-[#E2D6C8] p-5 space-y-2">
               <h2 className="font-extrabold text-base flex items-center gap-2 text-[#2D2A26]">
                 <HeartHandshake className="w-4 h-4 text-[#3B7A57]" />
-                4. Modistas por encargo
+                4. Modistas por encargo, Verificada y Directorio de Telas
               </h2>
               <p className="text-sm text-[#5C554E] leading-relaxed">
-                Si activas la etiqueta “Modista por encargo” en tu perfil, las clientas podrán encontrarte y escribirte solo por los canales que decidas mostrar. MoldeFácil no procesa pagos ni cobra comisiones por tus trabajos.
+                MoldeFácil no cobra comisiones ni procesa pagos. La etiqueta manual <strong>“Verificada”</strong> indica que revisamos la actividad del perfil, pero <strong>no es una garantía comercial ni un seguro</strong>. En el directorio de tiendas, solo cuentas con más de 30 días y participación previa pueden reseñar, y toda relación comercial debe declararse de forma transparente.
               </p>
             </article>
           </div>

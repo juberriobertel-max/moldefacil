@@ -308,11 +308,10 @@ export default function SeamstressProfileClient({
                         : `Ahora sigues el taller de @${perfil.usuario_unico}.`
                     );
                   }}
-                  className={`min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-extrabold inline-flex items-center gap-2 cursor-pointer transition ${
-                    siguiendo
-                      ? "bg-[#3B7A57] text-white"
-                      : "bg-[#B34720] hover:bg-[#973B1A] text-white"
-                  }`}
+                  className={`min-h-[44px] px-4 py-2.5 rounded-xl text-sm font-extrabold inline-flex items-center gap-2 cursor-pointer transition ${siguiendo
+                    ? "bg-[#3B7A57] text-white"
+                    : "bg-[#B34720] hover:bg-[#973B1A] text-white"
+                    }`}
                 >
                   {siguiendo ? (
                     <>
@@ -512,18 +511,28 @@ export default function SeamstressProfileClient({
                         <Heart className="w-3.5 h-3.5 text-[#B34720]" />
                         {pub.conteo_reacciones}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const token = codificarConfigMoldeParaUrl(pub.config_molde);
-                          saveComunidadEstado(registrarRemixMolde(estado, pub.id));
-                          router.push(`/?molde_comunidad=${encodeURIComponent(token)}`);
-                        }}
-                        className="min-h-[44px] px-4 py-2 rounded-xl bg-[#B34720] hover:bg-[#973B1A] text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        Hacer este molde
-                      </button>
+                      {pub.config_molde ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!pub.config_molde) return;
+                            const token = codificarConfigMoldeParaUrl(pub.config_molde);
+                            saveComunidadEstado(registrarRemixMolde(estado, pub.id));
+                            router.push(`/?molde_comunidad=${encodeURIComponent(token)}`);
+                          }}
+                          className="min-h-[44px] px-4 py-2 rounded-xl bg-[#B34720] hover:bg-[#973B1A] text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          Hacer este molde
+                        </button>
+                      ) : (
+                        <Link
+                          href={`/comunidad#${pub.slug}`}
+                          className="min-h-[44px] px-4 py-2 rounded-xl bg-[#EFF7F1] border border-[#B8D7C3] text-[#28593D] text-xs font-extrabold inline-flex items-center gap-1.5"
+                        >
+                          Moda real
+                        </Link>
+                      )}
                     </div>
                   </div>
                 </article>

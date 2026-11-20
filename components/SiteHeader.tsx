@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Scissors, Users, Wrench } from "lucide-react";
+import { BookOpen, Scissors, ShieldCheck, Users, Wrench } from "lucide-react";
 
 interface SiteHeaderProps {
   rightSlot?: React.ReactNode;
@@ -42,6 +42,13 @@ const NAV_ITEMS = [
     icon: Wrench,
     match: (pathname: string) =>
       pathname === "/taller" || pathname.startsWith("/taller/"),
+  },
+  {
+    href: "/cuenta",
+    label: "Mi Cuenta",
+    shortLabel: "Cuenta",
+    icon: ShieldCheck,
+    match: (pathname: string) => pathname === "/cuenta",
   },
 ];
 

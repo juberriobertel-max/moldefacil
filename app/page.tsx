@@ -292,12 +292,35 @@ export default function HomePage() {
   }));
   const [usuarioFijoTela3D, setUsuarioFijoTela3D] = useState<boolean>(false);
   const [esPantallaAncha, setEsPantallaAncha] = useState<boolean>(false);
+  const [modoAhorroDatos, setModoAhorroDatos] = useState<boolean>(false);
+  const [permitir3DEnAhorro, setPermitir3DEnAhorro] = useState<boolean>(false);
+  const [ajusteSugeridoPreview, setAjusteSugeridoPreview] = useState<{
+    zona: string;
+    cmDelta: number;
+  } | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
     const sincronizar = () => setEsPantallaAncha(mq.matches);
-    queueMicrotask(sincronizar);
+    queueMicrotask(() => {
+      sincronizar();
+      const navConn = navigator as Navigator & {
+        connection?: { saveData?: boolean };
+      };
+      if (navConn.connection?.saveData) {
+        setModoAhorroDatos(true);
+      }
+      const sp = new URLSearchParams(window.location.search);
+      const aj = sp.get("ajuste_sugerido");
+      if (aj && aj.includes(":")) {
+        const [zona, cmStr] = aj.split(":");
+        const cmDelta = Number(cmStr);
+        if (zona && Number.isFinite(cmDelta)) {
+          setAjusteSugeridoPreview({ zona, cmDelta });
+        }
+      }
+    });
     mq.addEventListener("change", sincronizar);
     return () => mq.removeEventListener("change", sincronizar);
   }, []);
@@ -1749,8 +1772,54 @@ export default function HomePage() {
                 <Share2 className="w-4 h-4" />
                 <span>Compartir mi creación</span>
               </button>
+              <button
+                type="button"
+                onClick={() => router.push("/comunidad?tab=encargos")}
+                className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[#FFF5EE] hover:bg-[#FCE8DB] border border-[#E5B8A0] text-[#8A3112] text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Shirt className="w-4 h-4" />
+                <span>Pedir a una modista</span>
+              </button>
             </div>
           </div>
+
+          {ajusteSugeridoPreview && (
+            <div
+              role="region"
+              aria-label="Sugerencia comunitaria de ajuste"
+              className="rounded-2xl bg-[#FFF9F2] border border-[#E5C9A8] px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[#2D2A26]"
+            >
+              <div>
+                <strong>Sugerencia comunitaria opcional (k≥5):</strong> algunas modistas recomiendan{" "}
+                <strong>
+                  {ajusteSugeridoPreview.cmDelta > 0 ? `+${ajusteSugeridoPreview.cmDelta}` : ajusteSugeridoPreview.cmDelta} cm
+                </strong>{" "}
+                en zona <strong>{ajusteSugeridoPreview.zona}</strong>. Nunca se aplica sin tu confirmación.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVistaPatron("dividida");
+                    setCommunityRemixNotice(
+                      `Vista comparativa lista para probar tu ajuste sugerido en ${ajusteSugeridoPreview.zona} (${ajusteSugeridoPreview.cmDelta} cm) sin sobrescribir tus medidas.`
+                    );
+                    setAjusteSugeridoPreview(null);
+                  }}
+                  className="min-h-[36px] px-3 rounded-lg bg-[#B34720] text-white font-extrabold cursor-pointer"
+                >
+                  Previsualizar en 2D/3D
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAjusteSugeridoPreview(null)}
+                  className="min-h-[36px] px-3 rounded-lg bg-white border border-[#E2D6C8] font-bold cursor-pointer"
+                >
+                  Descartar
+                </button>
+              </div>
+            </div>
+          )}
 
           {communityRemixNotice && (
             <div
@@ -1788,16 +1857,35 @@ export default function HomePage() {
 
             {(vistaPatron === "3d" ||
               (vistaPatron === "dividida" && !esPantallaAncha)) && (
-              <Garment3DPreview
-                medidas={medidas3D}
-                config={configPrenda3D}
-                apariencia={aparienciaEfectiva3D}
-                onAparienciaChange={handleApariencia3DChange}
-                patternPieces={pattern.pieces}
-                activePieceId={activePieceId}
-                onActivePieceIdChange={setActivePieceId}
-                onCompartirCreacion={handleCompartirCreacion}
-              />
+              modoAhorroDatos && !permitir3DEnAhorro ? (
+                <div className="rounded-3xl bg-[#FAF6F0] border border-[#E2D6C8] p-8 text-center space-y-3">
+                  <p className="text-sm font-extrabold text-[#2D2A26]">
+                    Modo Ahorro de Datos detectado
+                  </p>
+                  <p className="text-xs text-[#5C554E] max-w-md mx-auto">
+                    Pospusimos la descarga del probador 3D para ahorrar tus megas. Tu
+                    molde 2D e impresión PDF siguen disponibles al 100%.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setPermitir3DEnAhorro(true)}
+                    className="min-h-[44px] px-5 py-2 rounded-xl bg-[#B34720] text-white text-xs font-extrabold cursor-pointer"
+                  >
+                    Ver en 3D ahora
+                  </button>
+                </div>
+              ) : (
+                <Garment3DPreview
+                  medidas={medidas3D}
+                  config={configPrenda3D}
+                  apariencia={aparienciaEfectiva3D}
+                  onAparienciaChange={handleApariencia3DChange}
+                  patternPieces={pattern.pieces}
+                  activePieceId={activePieceId}
+                  onActivePieceIdChange={setActivePieceId}
+                  onCompartirCreacion={handleCompartirCreacion}
+                />
+              )
             )}
 
             {vistaPatron === "dividida" && esPantallaAncha && (

@@ -6,6 +6,7 @@ import { BLOG_POSTS, getBlogPostBySlug } from "@/lib/blogPosts";
 import SiteHeader from "@/components/SiteHeader";
 import AdBanner from "@/components/AdBanner";
 import BlogArticleRenderer from "@/components/blog/BlogArticleRenderer";
+import BlogOfflineAndGlossaryBar from "@/components/blog/BlogOfflineAndGlossaryBar";
 import BlogShareButtons from "@/components/blog/BlogShareButtons";
 import ReadingProgressBar from "@/components/blog/ReadingProgressBar";
 
@@ -182,6 +183,8 @@ export default async function BlogPostPage({
               slug={post.slug}
               readingTime={post.tiempoLectura}
             />
+
+            <BlogOfflineAndGlossaryBar slug={post.slug} />
 
             {/* Bottom Share Box */}
             <div className="rounded-3xl bg-white border border-[#E5DCD0] p-5 sm:p-6 shadow-xs space-y-3 max-w-3xl">

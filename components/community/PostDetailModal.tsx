@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   ThumbsUp,
+  Trash2,
   X,
 } from "lucide-react";
 import {
@@ -24,6 +25,7 @@ import {
   crearComentario,
   crearReporteModeracion,
   editarComentario,
+  eliminarPublicacionComunidad,
   type EstadoComunidad,
   guardarEnColeccion,
   obtenerActorActivo,
@@ -32,6 +34,7 @@ import {
 import { codificarConfigMoldeParaUrl } from "@/lib/community/patternBridge";
 import {
   puedeEditarComentario,
+  puedeEditarContenido,
 } from "@/lib/community/rlsPolicyEngine";
 import type {
   MotivoReporte,
@@ -72,6 +75,7 @@ export default function PostDetailModal({
   const [motivoReporte, setMotivoReporte] =
     useState<MotivoReporte>("falta_respeto");
   const [detalleReporte, setDetalleReporte] = useState<string>("");
+  const [confirmandoEliminar, setConfirmandoEliminar] = useState<boolean>(false);
   const [avisoLocal, setAvisoLocal] = useState<string | null>(null);
   const [ahoraTickMs, setAhoraTickMs] = useState<number>(0);
 
@@ -142,9 +146,23 @@ export default function PostDetailModal({
   };
 
   const abrirMolde = () => {
+    if (!publicacion.config_molde) return;
     const token = codificarConfigMoldeParaUrl(publicacion.config_molde);
     alActualizarEstado(registrarRemixMolde(estado, publicacion.id));
     router.push(`/?molde_comunidad=${encodeURIComponent(token)}`);
+  };
+
+  const puedeEliminar = puedeEditarContenido(actor, publicacion.autora_id);
+
+  const manejarEliminarPublicacion = () => {
+    const res = eliminarPublicacionComunidad(estado, publicacion.id);
+    if (!res.ok) {
+      setAvisoLocal(res.error ?? "No se pudo eliminar la publicación.");
+      return;
+    }
+    setConfirmandoEliminar(false);
+    alActualizarEstado(res.estado, "Publicación eliminada del taller.");
+    alCerrar();
   };
 
   const compartirEnWhatsapp = () => {
@@ -333,39 +351,88 @@ export default function PostDetailModal({
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-white border border-[#E2D6C8] p-4 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-extrabold text-[#2D2A26]">
-                    Configuración del molde (v{publicacion.version_config})
+              {publicacion.config_molde ? (
+                <div className="rounded-2xl bg-white border border-[#E2D6C8] p-4 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-extrabold text-[#2D2A26]">
+                      Configuración del molde (v{publicacion.version_config})
+                    </p>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-[#28593D]">
+                      <Lock className="w-3 h-3" />
+                      Sin medidas privadas
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold text-[#5C554E]">
+                    <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0]">
+                      Escote: {publicacion.config_molde.necklineStyle}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0]">
+                      Manga: {publicacion.config_molde.sleeveStyle}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0]">
+                      Silueta: {publicacion.config_molde.torsoFit}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0]">
+                      Margen: {publicacion.config_molde.seamAllowance} cm
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={abrirMolde}
+                    className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-[#B34720] hover:bg-[#973B1A] text-white text-sm font-extrabold inline-flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Hacer este molde con mis medidas
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-[#EFF7F1] border border-[#C6DFCD] p-4 space-y-1.5">
+                  <p className="text-xs font-extrabold text-[#28593D]">
+                    Moda real / Creación libre
                   </p>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-[#28593D]">
-                    <Lock className="w-3 h-3" />
-                    Sin medidas privadas
-                  </span>
+                  <p className="text-xs text-[#3C4A40]">
+                    {publicacion.referencia_inspiracion ??
+                      "Inspiración real compartida por una modista sin partir de un molde fijo del generador."}
+                  </p>
                 </div>
-                <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold text-[#5C554E]">
-                  <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0]">
-                    Escote: {publicacion.config_molde.necklineStyle}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0]">
-                    Manga: {publicacion.config_molde.sleeveStyle}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0]">
-                    Silueta: {publicacion.config_molde.torsoFit}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-[#FAF6F0]">
-                    Margen: {publicacion.config_molde.seamAllowance} cm
-                  </span>
+              )}
+
+              {puedeEliminar && (
+                <div className="rounded-2xl bg-[#FFF5F3] border border-[#E7C2B9] p-3 flex flex-wrap items-center justify-between gap-2">
+                  {confirmandoEliminar ? (
+                    <>
+                      <span className="text-xs font-extrabold text-[#8A3112]">
+                        ¿Confirmas eliminar esta publicación permanentemente?
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={manejarEliminarPublicacion}
+                          className="min-h-[38px] px-3 rounded-xl bg-[#B34720] text-white text-xs font-extrabold cursor-pointer"
+                        >
+                          Sí, eliminar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmandoEliminar(false)}
+                          className="min-h-[38px] px-3 rounded-xl bg-white border border-[#E2D6C8] text-xs font-bold text-[#2D2A26] cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmandoEliminar(true)}
+                      className="min-h-[40px] px-3 rounded-xl text-xs font-extrabold text-[#8A3112] hover:bg-[#FFEAE5] inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Eliminar publicación
+                    </button>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={abrirMolde}
-                  className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-[#B34720] hover:bg-[#973B1A] text-white text-sm font-extrabold inline-flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  Hacer este molde con mis medidas
-                </button>
-              </div>
+              )}
 
               <div className="flex flex-wrap gap-2">
                 {(

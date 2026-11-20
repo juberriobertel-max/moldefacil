@@ -78,10 +78,10 @@ export default function PrivacidadComunidadPage() {
             <article className="rounded-2xl bg-[#FAF6F0] border border-[#E2D6C8] p-5 space-y-2">
               <h2 className="font-extrabold text-base flex items-center gap-2">
                 <Trash2 className="w-4 h-4 text-[#B34720]" />
-                Borrado real y control de contacto
+                Borrado real, cuentas seguras y encargos (30 días revocable)
               </h2>
               <p className="text-sm text-[#5C554E] leading-relaxed">
-                Tú decides si tu perfil es público o visible solo para usuarias registradas, quién puede comentar y si activas o apagas tu WhatsApp o Instagram. Si decides irte, puedes eliminar tu cuenta y su contenido desde tus ajustes.
+                Tu cuenta usa cookies <code>httpOnly</code>, verificación anti-contraseñas filtradas (HIBP k-anonimato), 2FA opcional (obligatorio para moderación) y borrado con 14 días de gracia. En las estadísticas de calce (<strong>k ≥ 5</strong>) agrupamos medidas en rangos de 5 cm sin mostrar números exactos. En encargos, tus medidas están ocultas por defecto y si decides compartirlas con una modista el permiso caduca a los 30 días o cuando tú lo revoques (con registro de auditoría de cada consulta).
               </p>
             </article>
           </div>
@@ -91,8 +91,13 @@ export default function PrivacidadComunidadPage() {
             className="rounded-2xl bg-[#FFF6F2] border-2 border-[#E6B8A5] p-5 space-y-2"
           >
             <h2 className="text-base font-extrabold text-[#8A3112]">
-              Recordatorio importante para la administración del proyecto
+              Aspectos recomendados para revisar con asesoría legal antes de escalar
             </h2>
+            <ul className="list-disc pl-5 text-xs sm:text-sm text-[#5C554E] space-y-1">
+              <li>Edad mínima legal de consentimiento digital según país de destino (Colombia, México, Argentina, España: 14 a 18 años según jurisdicción).</li>
+              <li>Aviso explícito de intermediación gratuita sin pasarela de pagos ni responsabilidad por acuerdos privados entre clientas y modistas.</li>
+              <li>Conservación de logs de seguridad IP enmascarados y plazos reales de eliminación definitiva (14 días).</li>
+            </ul>
             <p className="text-sm text-[#5C554E] leading-relaxed">
               Estos textos reflejan el funcionamiento técnico real de la aplicación. Antes de lanzar campañas masivas o recibir usuarias de distintos países, <strong>revisa y adapta este aviso de privacidad y términos de uso con un profesional legal especializado en protección de datos de tu país</strong> (por ejemplo Ley 1581 en Colombia, LFPDPPP en México, LGPD en Brasil o RGPD en Europa).
             </p>
