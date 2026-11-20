@@ -1,11 +1,29 @@
 import { createBrowserClient, createServerClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { NextResponse } from "next/server";
 
 export function estaSupabaseConfigurado(): boolean {
   return Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   );
+}
+
+export function parseCookiesRaw(
+  cookieHeader: string | null
+): Array<{ name: string; value: string }> {
+  if (!cookieHeader) return [];
+  return cookieHeader
+    .split(";")
+    .map((part) => {
+      const idx = part.indexOf("=");
+      if (idx < 0) return null;
+      return {
+        name: part.slice(0, idx).trim(),
+        value: decodeURIComponent(part.slice(idx + 1).trim()),
+      };
+    })
+    .filter((entry): entry is { name: string; value: string } => entry !== null);
 }
 
 /**
@@ -19,15 +37,15 @@ export function crearClienteSupabaseNavegador(): SupabaseClient | null {
   return createBrowserClient(url, anonKey);
 }
 
+export interface SupabaseCookieMutation {
+  name: string;
+  value: string;
+  options?: Record<string, unknown>;
+}
+
 export interface CookieStoreAdapter {
   getAll: () => Array<{ name: string; value: string }>;
-  setAll?: (
-    cookies: Array<{
-      name: string;
-      value: string;
-      options?: Record<string, unknown>;
-    }>
-  ) => void;
+  setAll?: (cookies: SupabaseCookieMutation[]) => void;
 }
 
 /**
@@ -58,4 +76,32 @@ export function crearClienteSupabaseServidor(
       },
     },
   });
+}
+
+/**
+ * Crea un cliente Supabase SSR ligado al `Request` actual y devuelve un helper
+ * `aplicarCookies(response)` para persistir las cookies PKCE / sesión en la respuesta HTTP.
+ */
+export function crearClienteSupabaseParaRoute(request: Request): {
+  supa: SupabaseClient;
+  aplicarCookies: (response: NextResponse) => NextResponse;
+} | null {
+  const pendingCookies: SupabaseCookieMutation[] = [];
+  const supa = crearClienteSupabaseServidor({
+    getAll: () => parseCookiesRaw(request.headers.get("cookie")),
+    setAll: (list) => {
+      pendingCookies.push(...list);
+    },
+  });
+  if (!supa) return null;
+
+  return {
+    supa,
+    aplicarCookies(response: NextResponse): NextResponse {
+      for (const c of pendingCookies) {
+        response.cookies.set(c.name, c.value, c.options);
+      }
+      return response;
+    },
+  };
 }

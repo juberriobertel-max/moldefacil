@@ -16,7 +16,7 @@ import {
   validarPoliticaPasswordCompleta,
 } from "@/lib/auth/serverAuth";
 import {
-  crearClienteSupabaseServidor,
+  crearClienteSupabaseParaRoute,
   estaSupabaseConfigurado,
 } from "@/lib/community/supabaseClient";
 
@@ -67,16 +67,18 @@ export async function POST(request: Request) {
     }
 
     if (estaSupabaseConfigurado()) {
-      const supa = crearClienteSupabaseServidor({ getAll: () => [] });
-      if (supa) {
+      const cliente = crearClienteSupabaseParaRoute(request);
+      if (cliente) {
         const origin = new URL(request.url).origin;
-        await supa.auth.resetPasswordForEmail(correo, {
-          redirectTo: `${origin}/cuenta?modo=recuperar`,
+        await cliente.supa.auth.resetPasswordForEmail(correo, {
+          redirectTo: `${origin}/api/auth/callback?next=${encodeURIComponent("/cuenta?modo=recuperar")}`,
         });
-        return NextResponse.json({
-          ok: true,
-          mensaje: MENSAJE_SOLICITUD_NEUTRO,
-        });
+        return cliente.aplicarCookies(
+          NextResponse.json({
+            ok: true,
+            mensaje: MENSAJE_SOLICITUD_NEUTRO,
+          })
+        );
       }
     }
 
@@ -166,19 +168,24 @@ export async function PATCH(request: Request) {
     }
 
     if (estaSupabaseConfigurado()) {
-      const supa = crearClienteSupabaseServidor({ getAll: () => [] });
-      if (supa) {
-        const { error } = await supa.auth.updateUser({ password: nuevaContrasena });
+      const cliente = crearClienteSupabaseParaRoute(request);
+      if (cliente) {
+        const { error } = await cliente.supa.auth.updateUser({
+          password: nuevaContrasena,
+        });
         if (error) {
           return NextResponse.json(
             { ok: false, error: "El enlace expiró o ya fue utilizado." },
             { status: 400 }
           );
         }
-        return NextResponse.json({
-          ok: true,
-          mensaje: "Contraseña actualizada correctamente.",
-        });
+        await cliente.supa.auth.signOut({ scope: "others" });
+        return cliente.aplicarCookies(
+          NextResponse.json({
+            ok: true,
+            mensaje: "Contraseña actualizada correctamente.",
+          })
+        );
       }
     }
 
