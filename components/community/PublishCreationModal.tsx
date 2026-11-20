@@ -95,6 +95,10 @@ export default function PublishCreationModal({
   const [titulo, setTitulo] = useState<string>(
     borrador?.tituloSugerido ?? ""
   );
+  const [tipoPublicacion, setTipoPublicacion] = useState<
+    "molde_plataforma" | "moda_real"
+  >("molde_plataforma");
+  const [referenciaInspiracion, setReferenciaInspiracion] = useState<string>("");
   const [prenda, setPrenda] = useState<string>(
     borrador?.prendaLabel ?? "Vestido"
   );
@@ -240,6 +244,7 @@ export default function PublishCreationModal({
     }
 
     const res = crearPublicacionComunidad(estado, {
+      tipo_publicacion: tipoPublicacion,
       titulo,
       descripcion,
       aprendizaje_nota: aprendizajeNota,
@@ -248,7 +253,14 @@ export default function PublishCreationModal({
       dificultad,
       tiempo_horas: Number(tiempoHoras) || 2,
       costo_aprox: costoAprox.trim() || undefined,
-      config_molde: borrador?.config_molde ?? CONFIG_POR_DEFECTO,
+      config_molde:
+        tipoPublicacion === "molde_plataforma"
+          ? (borrador?.config_molde ?? CONFIG_POR_DEFECTO)
+          : undefined,
+      referencia_inspiracion:
+        tipoPublicacion === "moda_real"
+          ? referenciaInspiracion.trim() || undefined
+          : undefined,
       captura_3d_url: borrador?.captura3dUrl,
       permiso_fotos_confirmado: permisoConfirmado,
       reto_id: unirseReto ? RETO_MENSUAL_DEMO.id : undefined,
@@ -453,6 +465,44 @@ export default function PublishCreationModal({
 
           {paso === 2 && (
             <div className="space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setTipoPublicacion("molde_plataforma")}
+                  className={`min-h-[44px] px-3.5 py-2.5 rounded-xl border text-left text-xs font-extrabold cursor-pointer ${
+                    tipoPublicacion === "molde_plataforma"
+                      ? "bg-[#FFF5EE] border-[#B34720] text-[#8A3112]"
+                      : "bg-white border-[#E2D6C8] text-[#5C554E]"
+                  }`}
+                >
+                  Hecho con molde de MoldeFácil
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTipoPublicacion("moda_real")}
+                  className={`min-h-[44px] px-3.5 py-2.5 rounded-xl border text-left text-xs font-extrabold cursor-pointer ${
+                    tipoPublicacion === "moda_real"
+                      ? "bg-[#EFF7F1] border-[#3B7A57] text-[#28593D]"
+                      : "bg-white border-[#E2D6C8] text-[#5C554E]"
+                  }`}
+                >
+                  Moda real / Creación libre (sin molde base)
+                </button>
+              </div>
+
+              {tipoPublicacion === "moda_real" && (
+                <label className="block text-xs font-extrabold text-[#28593D]">
+                  Inspiración o técnica libre (opcional)
+                  <input
+                    type="text"
+                    value={referenciaInspiracion}
+                    onChange={(e) => setReferenciaInspiracion(e.target.value)}
+                    placeholder="Ej. Sastrería libre, moda de calle o transformación personal"
+                    className="mt-1 w-full min-h-[44px] px-3.5 py-2 rounded-xl bg-white border border-[#B8D7C3] text-sm text-[#2D2A26]"
+                  />
+                </label>
+              )}
+
               <label className="block text-xs font-extrabold text-[#2D2A26]">
                 Título de tu creación
                 <input
