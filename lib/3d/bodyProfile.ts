@@ -372,6 +372,57 @@ function calcularTrayectoriasCuerpo(params: {
 }
 
 /**
+ * Interpola una lista descendente de 8 anillos clave mediante tangentes monótonas
+ * Fritsch-Carlson produciendo los 40 anillos continuos del torso.
+ */
+export function interpolarAnillosTorso(
+  listaClaveDesc: AnilloPerfil[]
+): AnilloPerfil[] {
+  const ysClave = listaClaveDesc.map((r) => r.y);
+  const asClave = listaClaveDesc.map((r) => r.a);
+  const bsClave = listaClaveDesc.map((r) => r.b);
+  const dzsClave = listaClaveDesc.map((r) => r.desplazamientoZ);
+
+  const tA = calcularTangentesMonotonas(ysClave, asClave);
+  const tB = calcularTangentesMonotonas(ysClave, bsClave);
+  const tDz = calcularTangentesMonotonas(ysClave, dzsClave);
+
+  const anillosInterpolados: AnilloPerfil[] = [];
+  const muestrasPorTramo = [4, 7, 5, 5, 6, 6, 6]; // 40 anillos en total
+
+  for (let i = 0; i < listaClaveDesc.length - 1; i++) {
+    const inicio = listaClaveDesc[i];
+    const fin = listaClaveDesc[i + 1];
+    const pasos = muestrasPorTramo[i] ?? 5;
+
+    for (let s = 0; s < pasos; s++) {
+      if (s === 0) {
+        anillosInterpolados.push(inicio);
+      } else {
+        const frac = s / pasos;
+        const y = inicio.y + (fin.y - inicio.y) * frac;
+        const a = Math.max(0.03, evaluarHermiteMonotono(ysClave, asClave, tA, y));
+        const b = Math.max(0.025, evaluarHermiteMonotono(ysClave, bsClave, tB, y));
+        const dz = evaluarHermiteMonotono(ysClave, dzsClave, tDz, y);
+        anillosInterpolados.push({
+          y,
+          a,
+          b,
+          desplazamientoZ: dz,
+          perimetroObjetivoCm: Number(
+            (calcularPerimetroElipseM(a, b) * 100).toFixed(2)
+          ),
+        });
+      }
+    }
+  }
+  if (listaClaveDesc.length > 0) {
+    anillosInterpolados.push(listaClaveDesc[listaClaveDesc.length - 1]);
+  }
+  return anillosInterpolados;
+}
+
+/**
  * Genera el perfil anatómico único del cuerpo (`getBodyProfile`) con figura completa de pie
  * apoyada en el piso (`y = 0`), ~40 anillos interpolados de torso y trayectorias paramétricas reales.
  */
@@ -491,46 +542,7 @@ export function getBodyProfile(
     muslo,
   ];
 
-  // Tangentes monótonas para muestrear ~40 anillos garantizando paso exacto por los clave
-  const ysClave = listaClaveDesc.map((r) => r.y);
-  const asClave = listaClaveDesc.map((r) => r.a);
-  const bsClave = listaClaveDesc.map((r) => r.b);
-  const dzsClave = listaClaveDesc.map((r) => r.desplazamientoZ);
-
-  const tA = calcularTangentesMonotonas(ysClave, asClave);
-  const tB = calcularTangentesMonotonas(ysClave, bsClave);
-  const tDz = calcularTangentesMonotonas(ysClave, dzsClave);
-
-  const anillosInterpolados: AnilloPerfil[] = [];
-  const muestrasPorTramo = [4, 7, 5, 5, 6, 6, 6]; // 40 anillos en total
-
-  for (let i = 0; i < listaClaveDesc.length - 1; i++) {
-    const inicio = listaClaveDesc[i];
-    const fin = listaClaveDesc[i + 1];
-    const pasos = muestrasPorTramo[i] ?? 5;
-
-    for (let s = 0; s < pasos; s++) {
-      if (s === 0) {
-        anillosInterpolados.push(inicio);
-      } else {
-        const frac = s / pasos;
-        const y = inicio.y + (fin.y - inicio.y) * frac;
-        const a = Math.max(0.03, evaluarHermiteMonotono(ysClave, asClave, tA, y));
-        const b = Math.max(0.025, evaluarHermiteMonotono(ysClave, bsClave, tB, y));
-        const dz = evaluarHermiteMonotono(ysClave, dzsClave, tDz, y);
-        anillosInterpolados.push({
-          y,
-          a,
-          b,
-          desplazamientoZ: dz,
-          perimetroObjetivoCm: Number(
-            (calcularPerimetroElipseM(a, b) * 100).toFixed(2)
-          ),
-        });
-      }
-    }
-  }
-  anillosInterpolados.push(muslo);
+  const anillosInterpolados = interpolarAnillosTorso(listaClaveDesc);
 
   const anillosClave: Record<NombreSeccionAnatomica, AnilloPerfil> = {
     cuello,
