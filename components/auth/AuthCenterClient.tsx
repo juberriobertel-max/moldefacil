@@ -40,6 +40,8 @@ export default function AuthCenterClient() {
     searchParams.get("verificar") ||
     "";
   const tokenRecupUrl = searchParams.get("token") || "";
+  const authErrorUrl = searchParams.get("auth_error") || "";
+  const verificadoUrl = searchParams.get("verificado") === "1";
   const modoInicial = searchParams.get("modo");
   const [humanaConfirmada, setHumanaConfirmada] = useState<boolean>(false);
 
@@ -87,8 +89,12 @@ export default function AuthCenterClient() {
   const [passEliminar, setPassEliminar] = useState<string>("");
 
   const [ocupado, setOcupado] = useState<boolean>(false);
-  const [mensajeOk, setMensajeOk] = useState<string | null>(null);
-  const [mensajeError, setMensajeError] = useState<string | null>(null);
+  const [mensajeOk, setMensajeOk] = useState<string | null>(
+    verificadoUrl ? "Tu correo quedó verificado correctamente." : null
+  );
+  const [mensajeError, setMensajeError] = useState<string | null>(
+    authErrorUrl || null
+  );
 
   const fuerzaReg = evaluarFortalezaContrasena(passReg);
   const fuerzaNueva = evaluarFortalezaContrasena(passNuevaCambio);
