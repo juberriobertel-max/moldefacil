@@ -14,7 +14,7 @@ export interface ManiquiInstancia {
 }
 
 const SEGMENTOS_RADIALES_TORSO = 48;
-const ACABADOS_MANIQUI: Record<
+export const ACABADOS_MANIQUI: Record<
   AcabadoManiqui3D,
   {
     cuerpo: number;
@@ -416,7 +416,7 @@ function crearGeometriaPieZapatoPlano(
  * Construye las cintas de modistería anatómicas (busto, cintura, cadera y líneas centrales)
  * adheridas suavemente (+1.3 mm) sobre la superficie del maniquí sin z-fighting.
  */
-function crearGrupoCintasModisteria(
+export function crearGrupoCintasModisteria(
   perfil: PerfilCuerpo,
   materialCinta: THREE.Material
 ): THREE.Group {
