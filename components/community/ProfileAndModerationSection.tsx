@@ -26,6 +26,12 @@ import {
   obtenerActorActivo,
   resolverReporteModeracion,
 } from "@/lib/community/communityStore";
+import {
+  loadAmpliacionEstado,
+  saveAmpliacionEstado,
+  toggleFeatureFlagComunidad,
+} from "@/lib/community/expansionStore";
+import type { FlagModuloComunidad } from "@/lib/community/featureFlags";
 import { PLANTILLAS_MENSAJES_MODERACION } from "@/lib/community/moderationEngine";
 import { esModeradoraOAdmin } from "@/lib/community/rlsPolicyEngine";
 import type {
@@ -631,6 +637,63 @@ export default function ProfileAndModerationSection({
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="space-y-2.5 pt-3 border-t border-[#EFE6DA]">
+            <h4 className="text-xs font-extrabold uppercase text-[#2D2A26]">
+              Interruptores de Módulos (Feature Flags Fases 13–23)
+            </h4>
+            <p className="text-[11px] text-[#5C554E]">
+              Fase 24 (Asistente IA) permanece desactivada por decisión de producto.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+              {(
+                [
+                  ["fitFeedback", "Fase 13 · Calce y Beta"],
+                  ["adjustmentsLibrary", "Fase 14 · Ajustes k≥5"],
+                  ["projectLogs", "Fase 15 · Bitácoras"],
+                  ["pwaOffline", "Fase 16 · PWA y Ahorro"],
+                  ["seamstressPortfolio", "Fase 17 · Portafolio"],
+                  ["commissions", "Fase 18 · Encargos 3D"],
+                  ["circles", "Fase 19 · Círculos"],
+                  ["mentorship", "Fase 20 · Mentoría 1:1"],
+                  ["learningPathsGlossary", "Fase 22 · Rutas y Glosario"],
+                  ["supplierDirectory", "Fase 23 · Tiendas Telas"],
+                ] as ReadonlyArray<[FlagModuloComunidad, string]>
+              ).map(([flagKey, label]) => {
+                const amp = loadAmpliacionEstado();
+                const activo = amp.featureFlags[flagKey];
+                return (
+                  <button
+                    key={flagKey}
+                    type="button"
+                    onClick={() => {
+                      const res = toggleFeatureFlagComunidad(
+                        amp,
+                        actor,
+                        flagKey,
+                        !activo
+                      );
+                      if (res.ok) {
+                        saveAmpliacionEstado(res.estado);
+                        alActualizarEstado(
+                          estado,
+                          `${label}: ${!activo ? "activado" : "desactivado"}.`
+                        );
+                      }
+                    }}
+                    className={`min-h-[38px] px-3 rounded-xl border font-bold text-left cursor-pointer ${
+                      activo
+                        ? "bg-[#EFF7F1] border-[#B8D7C3] text-[#28593D]"
+                        : "bg-[#FAF6F0] border-[#E2D6C8] text-[#5C554E]"
+                    }`}
+                  >
+                    {activo ? "✓ " : "○ "}
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
