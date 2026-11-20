@@ -20,6 +20,7 @@ import {
   puedeAceptarRespuesta,
   puedeComentarEnPublicacion,
   puedeEditarComentario,
+  puedeEditarContenido,
   puedeModerarReporte,
   puedeVotarEnReto,
   resolverEstadoInicialPublicacion,
@@ -181,10 +182,12 @@ export function crearEstadoInicialComunidad(): EstadoComunidad {
     publicaciones: PUBLICACIONES_DEMO.map((p) => ({
       ...p,
       fotos: p.fotos.map((f) => ({ ...f })),
-      config_molde: {
-        ...p.config_molde,
-        extras: { ...p.config_molde.extras },
-      },
+      config_molde: p.config_molde
+        ? {
+            ...p.config_molde,
+            extras: { ...p.config_molde.extras },
+          }
+        : undefined,
     })),
     comentarios: comentariosIniciales,
     reacciones: [],
@@ -401,6 +404,49 @@ export function crearCuentaModista(
   };
 }
 
+export function sincronizarPerfilDesdeCuentaAuth(
+  estado: EstadoComunidad,
+  cuenta: {
+    id: string;
+    nombrePublico: string;
+    usuarioUnico: string;
+    rol: "usuaria" | "moderadora" | "admin";
+  } | null
+): EstadoComunidad {
+  if (!cuenta) return estado;
+  const existente = estado.perfiles.find(
+    (p) => p.id === cuenta.id || p.usuario_unico === cuenta.usuarioUnico
+  );
+  if (existente) {
+    if (estado.usuariaActivaId === existente.id) return estado;
+    return { ...estado, usuariaActivaId: existente.id };
+  }
+  const nuevoPerfil: PerfilModista = {
+    id: cuenta.id,
+    nombre_publico: cuenta.nombrePublico,
+    usuario_unico: cuenta.usuarioUnico,
+    rol: cuenta.rol,
+    bio: "",
+    especialidades: [],
+    nivel: "aprendiz",
+    vende_por_encargo: false,
+    mostrar_contacto: false,
+    visibilidad_perfil: "publico",
+    permiso_comentarios: "todas",
+    resumen_semanal_correo: false,
+    publicaciones_aprobadas_count: 0,
+    suspendida: false,
+    es_demo: false,
+    creado_en: new Date().toISOString(),
+  };
+  return {
+    ...estado,
+    perfiles: [...estado.perfiles, nuevoPerfil],
+    insigniasPorUsuaria: { ...estado.insigniasPorUsuaria, [cuenta.id]: [] },
+    usuariaActivaId: cuenta.id,
+  };
+}
+
 export function cambiarUsuariaActiva(
   estado: EstadoComunidad,
   usuariaId: string | null
@@ -467,6 +513,7 @@ export function actualizarPerfilModista(
 export function crearPublicacionComunidad(
   estado: EstadoComunidad,
   input: {
+    tipo_publicacion?: "molde_plataforma" | "moda_real";
     titulo: string;
     descripcion: string;
     aprendizaje_nota: string;
@@ -475,7 +522,8 @@ export function crearPublicacionComunidad(
     dificultad: 1 | 2 | 3 | 4 | 5;
     tiempo_horas: number;
     costo_aprox?: string;
-    config_molde: ConfigMoldeSerializado;
+    config_molde?: ConfigMoldeSerializado;
+    referencia_inspiracion?: string;
     captura_3d_url?: string;
     permiso_fotos_confirmado: boolean;
     reto_id?: string;
@@ -498,11 +546,16 @@ export function crearPublicacionComunidad(
   const rl = registrarEventoRateLimit(estado, actor.id, "publicar", ahoraMs);
   if (!rl.ok) return { ok: false, error: rl.error, estado };
 
-  const configLimpia = sanitizarConfigMoldeSinMedidas(
-    input.config_molde as unknown as Record<string, unknown>
-  );
+  const tipoPublicacion = input.tipo_publicacion ?? "molde_plataforma";
+  const configLimpia =
+    tipoPublicacion === "molde_plataforma" && input.config_molde
+      ? sanitizarConfigMoldeSinMedidas(
+          input.config_molde as unknown as Record<string, unknown>
+        )
+      : undefined;
   const parsed = CrearPublicacionSchema.safeParse({
     ...input,
+    tipo_publicacion: tipoPublicacion,
     config_molde: configLimpia,
   });
   if (!parsed.success) {
@@ -573,6 +626,7 @@ export function crearPublicacionComunidad(
     id: pubId,
     slug: `${slugBase || "prenda"}-${pubId.slice(-6)}`,
     autora_id: actor.id,
+    tipo_publicacion: parsed.data.tipo_publicacion,
     titulo: parsed.data.titulo,
     descripcion: parsed.data.descripcion,
     aprendizaje_nota: parsed.data.aprendizaje_nota,
@@ -582,6 +636,7 @@ export function crearPublicacionComunidad(
     tiempo_horas: parsed.data.tiempo_horas,
     costo_aprox: parsed.data.costo_aprox,
     config_molde: parsed.data.config_molde,
+    referencia_inspiracion: parsed.data.referencia_inspiracion,
     version_config: 1,
     captura_3d_url: parsed.data.captura_3d_url,
     permiso_fotos_confirmado: true,
@@ -705,6 +760,44 @@ export function aprobarPublicacionEnRevision(
         },
         ...estado.notificaciones,
       ],
+    },
+  };
+}
+
+export function eliminarPublicacionComunidad(
+  estado: EstadoComunidad,
+  publicacionId: string
+): ResultadoOperacion {
+  const actor = obtenerActorActivo(estado);
+  if (!actor) {
+    return { ok: false, error: "Inicia sesión para eliminar una publicación.", estado };
+  }
+  const pub = estado.publicaciones.find((p) => p.id === publicacionId);
+  if (!pub) {
+    return { ok: false, error: "La publicación ya no existe.", estado };
+  }
+  if (!puedeEditarContenido(actor, pub.autora_id)) {
+    return {
+      ok: false,
+      error: "Solo la autora o el equipo de moderación pueden eliminar esta publicación.",
+      estado,
+    };
+  }
+
+  return {
+    ok: true,
+    idCreado: publicacionId,
+    estado: {
+      ...estado,
+      publicaciones: estado.publicaciones.filter((p) => p.id !== publicacionId),
+      comentarios: estado.comentarios.filter((c) => c.publicacion_id !== publicacionId),
+      guardados: estado.guardados.filter((g) => g.publicacion_id !== publicacionId),
+      reacciones: estado.reacciones.filter(
+        (r) => !(r.objeto_tipo === "publicacion" && r.objeto_id === publicacionId)
+      ),
+      participacionesReto: estado.participacionesReto.filter(
+        (pr) => pr.publicacion_id !== publicacionId
+      ),
     },
   };
 }
