@@ -1877,9 +1877,12 @@ function evaluarCentroYRadioPierna(
     rCuerpoY = THREE.MathUtils.lerp(pierna.radioMusloM, pierna.radioRodillaM, tLinCaderaRod);
   } else {
     cx = THREE.MathUtils.lerp(pierna.rodilla[0], pierna.tobillo[0], tLinRodTob);
-    cz = THREE.MathUtils.lerp(pierna.rodilla[2], pierna.tobillo[2], tLinRodTob);
-    // Volumen de pantorrilla coherente con LatheGeometry del maniquí
-    const curvaGemelo = Math.sin(clamp(tLinRodTob * 1.45, 0, Math.PI)) * 0.08 * pierna.radioRodillaM;
+    const factorGemelo = Math.sin(clamp(tLinRodTob * 1.45, 0, Math.PI));
+    cz =
+      THREE.MathUtils.lerp(pierna.rodilla[2], pierna.tobillo[2], tLinRodTob) +
+      (pierna.desplazamientoPantorrillaZM ?? 0) * factorGemelo;
+    // Volumen de pantorrilla coherente con la malla del maniquí
+    const curvaGemelo = factorGemelo * 0.08 * pierna.radioRodillaM;
     rCuerpoY =
       THREE.MathUtils.lerp(pierna.radioRodillaM, pierna.radioTobilloM, tLinRodTob) + curvaGemelo;
   }
