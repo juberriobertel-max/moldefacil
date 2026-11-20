@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Scissors, Wrench } from "lucide-react";
+import { BookOpen, Scissors, Users, Wrench } from "lucide-react";
 
 interface SiteHeaderProps {
   rightSlot?: React.ReactNode;
@@ -16,6 +16,16 @@ const NAV_ITEMS = [
     shortLabel: "Generador",
     icon: Scissors,
     match: (pathname: string) => pathname === "/",
+  },
+  {
+    href: "/comunidad",
+    label: "Comunidad de Modistas",
+    shortLabel: "Comunidad",
+    icon: Users,
+    match: (pathname: string) =>
+      pathname === "/comunidad" ||
+      pathname.startsWith("/comunidad/") ||
+      pathname.startsWith("/modistas/"),
   },
   {
     href: "/blog",
@@ -67,7 +77,7 @@ export default function SiteHeader({ rightSlot }: SiteHeaderProps) {
         <div className="flex flex-wrap items-center justify-between xl:justify-end gap-2.5">
           <nav
             aria-label="Navegación principal"
-            className="w-full sm:w-auto grid grid-cols-3 sm:flex items-center gap-2 bg-[#FAF8F5] p-1.5 rounded-2xl border border-slate-200"
+            className="w-full sm:w-auto grid grid-cols-2 sm:flex items-center gap-2 bg-[#FAF8F5] p-1.5 rounded-2xl border border-slate-200"
           >
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
