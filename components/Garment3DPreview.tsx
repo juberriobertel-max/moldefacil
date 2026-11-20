@@ -43,6 +43,7 @@ import {
   ResultadoMallaPrenda,
   ZonaPieza3D,
 } from "@/lib/3d/garmentMeshBuilder";
+import { cargarManiquiGLB } from "@/lib/3d/glbMannequinLoader";
 import { crearManiqui, ManiquiInstancia } from "@/lib/3d/mannequinBuilder";
 import {
   AcabadoManiqui3D,
@@ -480,6 +481,35 @@ export default function Garment3DPreview({
     };
     motorRef.current = motor;
 
+    // Sustitución progresiva del maniquí base por el modelo humano 3D esculpido (`base-female.glb`)
+    void cargarManiquiGLB(perfilIni).then((maniquiGlb) => {
+      if (desmontado || !maniquiGlb || motorRef.current !== motor) {
+        if (maniquiGlb) {
+          disposeObject(maniquiGlb.grupo);
+        }
+        return;
+      }
+
+      const prevManiqui = motor.maniqui;
+      maniquiGlb.actualizar(motor.perfilActual);
+      maniquiGlb.aplicarAcabado(aparienciaRef.current.acabadoManiqui ?? "lino");
+      maniquiGlb.mostrarCintasGuia(
+        Boolean(
+          aparienciaRef.current.mostrarCosturas ||
+            aparienciaRef.current.mostrarMapaCalce
+        )
+      );
+      const esCartucheraActual =
+        motor.configActual.subEstiloEspecial === "zipper_pouch";
+      maniquiGlb.grupo.visible = !esCartucheraActual;
+
+      scene.remove(prevManiqui.grupo);
+      disposeObject(prevManiqui.grupo);
+      scene.add(maniquiGlb.grupo);
+      motor.maniqui = maniquiGlb;
+      solicitarRender(false);
+    });
+
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
     let pointerDownX = 0;
@@ -745,9 +775,9 @@ export default function Garment3DPreview({
       });
       scene.remove(motor.prendaActual.grupo);
 
-      // Al desmontar liberamos maniquí completo (geometrías, materiales y su textura cruda)
-      disposeObject(maniqui.grupo);
-      scene.remove(maniqui.grupo);
+      // Al desmontar liberamos maniquí activo completo (geometrías, materiales y su textura cruda)
+      disposeObject(motor.maniqui.grupo);
+      scene.remove(motor.maniqui.grupo);
 
       sombra.dispose();
       iluminacion.dispose();
