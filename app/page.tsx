@@ -1,12 +1,14 @@
 "use client";
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   Box,
   Columns2,
   Download,
   Camera,
+  Share2,
   Shirt,
   Sparkles,
   Plus,
@@ -67,7 +69,16 @@ import AdBanner from "@/components/AdBanner";
 import DownloadAdModal from "@/components/DownloadAdModal";
 import SiteHeader from "@/components/SiteHeader";
 import HomeQueryParamsSync from "@/components/HomeQueryParamsSync";
-import { saveLastGeneratedPattern } from "@/lib/savedMeasurements";
+import {
+  loadMeasurementProfiles,
+  saveLastGeneratedPattern,
+} from "@/lib/savedMeasurements";
+import {
+  construirConfigMoldeDesdeGenerador,
+  generarEtiquetasDesdeConfig,
+  guardarBorradorCompartirCreacion,
+} from "@/lib/community/patternBridge";
+import type { ConfigMoldeSerializado } from "@/lib/community/types";
 import {
   APARIENCIA_POR_DEFECTO,
   PALETA_UI_3D,
@@ -481,6 +492,11 @@ export default function HomePage() {
     };
   }, [apariencia3D, fabricType, usuarioFijoTela3D]);
 
+  const router = useRouter();
+  const [communityRemixNotice, setCommunityRemixNotice] = useState<string | null>(
+    null
+  );
+
   const handleApariencia3DChange = useCallback(
     (siguiente: Apariencia) => {
       if (siguiente.tela !== aparienciaEfectiva3D.tela) {
@@ -489,6 +505,119 @@ export default function HomePage() {
       setApariencia3D(siguiente);
     },
     [aparienciaEfectiva3D.tela]
+  );
+
+  const handleApplyCommunityConfig = useCallback(
+    (cfg: ConfigMoldeSerializado) => {
+      setMode("template");
+      setCategory(cfg.category);
+      if (cfg.topSubStyle) setTopSubStyle(cfg.topSubStyle);
+      if (cfg.pantsSubStyle) setPantsSubStyle(cfg.pantsSubStyle);
+      if (cfg.skirtSubStyle) setSkirtSubStyle(cfg.skirtSubStyle);
+      if (cfg.dressSubStyle) setDressSubStyle(cfg.dressSubStyle);
+      if (cfg.twoPieceTopStyle) setTwoPieceTopStyle(cfg.twoPieceTopStyle);
+      if (cfg.twoPieceBottomStyle) setTwoPieceBottomStyle(cfg.twoPieceBottomStyle);
+      if (cfg.jumpsuitSubStyle) setJumpsuitSubStyle(cfg.jumpsuitSubStyle);
+      if (cfg.kidsSubStyle) setKidsSubStyle(cfg.kidsSubStyle);
+      if (cfg.loungewearSubStyle) setLoungewearSubStyle(cfg.loungewearSubStyle);
+      if (cfg.accessorySubStyle) setAccessorySubStyle(cfg.accessorySubStyle);
+      setNecklineStyle(cfg.necklineStyle);
+      setSleeveStyle(cfg.sleeveStyle);
+      setTorsoFit(cfg.torsoFit);
+      setSeamAllowance(cfg.seamAllowance);
+      setFabricType(cfg.fabricType);
+      setExtras(cfg.extras);
+      setQuickLength(cfg.quickLength);
+      setStyleVariant(cfg.styleVariant);
+      if (cfg.apariencia3D) {
+        setUsuarioFijoTela3D(true);
+        setApariencia3D((prev) => ({
+          ...prev,
+          tela: cfg.apariencia3D!.tela,
+          color: cfg.apariencia3D!.color,
+          estampado: cfg.apariencia3D!.estampado,
+          colorSecundario: cfg.apariencia3D!.colorSecundario ?? prev.colorSecundario,
+          acabadoManiqui: cfg.apariencia3D!.acabadoManiqui ?? prev.acabadoManiqui,
+        }));
+      }
+      const perfilesGuardados = loadMeasurementProfiles();
+      if (perfilesGuardados.length > 0) {
+        setMeasurements((prev) => ({
+          ...prev,
+          ...perfilesGuardados[0].measurements,
+        }));
+      }
+      setActiveFashionStyleId(null);
+      setActivePieceId("all");
+      setPins(getDefaultPinsForCategory(cfg.category));
+      setPinsMoved(false);
+      setOpenStep(2);
+      const { prendaLabel } = generarEtiquetasDesdeConfig(cfg);
+      setCommunityRemixNotice(
+        perfilesGuardados.length > 0
+          ? `Molde "${prendaLabel}" cargado desde la comunidad usando tu perfil de medidas "${perfilesGuardados[0].clientName}". Revisa el paso 2 si deseas ajustar algún detalle.`
+          : `Molde "${prendaLabel}" cargado desde la comunidad con tus medidas actuales de trabajo (nunca copiamos medidas de otras modistas).`
+      );
+    },
+    []
+  );
+
+  const handleCompartirCreacion = useCallback(
+    (captura3dUrl?: string) => {
+      const cfg = construirConfigMoldeDesdeGenerador({
+        category,
+        topSubStyle,
+        pantsSubStyle,
+        skirtSubStyle,
+        dressSubStyle,
+        twoPieceTopStyle,
+        twoPieceBottomStyle,
+        jumpsuitSubStyle,
+        kidsSubStyle,
+        loungewearSubStyle,
+        accessorySubStyle,
+        necklineStyle,
+        sleeveStyle,
+        torsoFit,
+        seamAllowance,
+        fabricType,
+        extras,
+        quickLength,
+        styleVariant,
+        apariencia3D: aparienciaEfectiva3D,
+      });
+      const etiquetas = generarEtiquetasDesdeConfig(cfg);
+      guardarBorradorCompartirCreacion({
+        ...etiquetas,
+        captura3dUrl,
+        config_molde: cfg,
+        creadoEn: new Date().toISOString(),
+      });
+      router.push("/comunidad?publicar=1");
+    },
+    [
+      accessorySubStyle,
+      aparienciaEfectiva3D,
+      category,
+      dressSubStyle,
+      extras,
+      fabricType,
+      jumpsuitSubStyle,
+      kidsSubStyle,
+      loungewearSubStyle,
+      necklineStyle,
+      pantsSubStyle,
+      quickLength,
+      router,
+      seamAllowance,
+      skirtSubStyle,
+      sleeveStyle,
+      styleVariant,
+      topSubStyle,
+      torsoFit,
+      twoPieceBottomStyle,
+      twoPieceTopStyle,
+    ]
   );
 
   useEffect(() => {
@@ -611,6 +740,7 @@ export default function HomePage() {
       <Suspense fallback={null}>
         <HomeQueryParamsSync
           onApplyPreset={applyFashionPreset}
+          onApplyCommunityConfig={handleApplyCommunityConfig}
           onSelectCategory={(cat) => {
             setCategory(cat);
             setStyleVariant("default");
@@ -1604,13 +1734,39 @@ export default function HomePage() {
               })}
             </div>
 
-            {vistaPatron === "dividida" && !esPantallaAncha && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#5C554E] px-2">
-                <Columns2 className="w-3.5 h-3.5 text-[#C85A32]" />
-                Vista única automática en móvil
-              </span>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {vistaPatron === "dividida" && !esPantallaAncha && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#5C554E] px-2">
+                  <Columns2 className="w-3.5 h-3.5 text-[#C85A32]" />
+                  Vista única automática en móvil
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => handleCompartirCreacion()}
+                className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[#3B7A57] hover:bg-[#2F6647] text-white text-xs sm:text-sm font-extrabold shadow-xs inline-flex items-center gap-1.5 transition cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] focus-visible:ring-offset-1"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>Compartir mi creación</span>
+              </button>
+            </div>
           </div>
+
+          {communityRemixNotice && (
+            <div
+              role="status"
+              className="rounded-2xl bg-[#3B7A57]/10 border border-[#3B7A57]/30 px-4 py-3 flex items-start justify-between gap-3 text-xs sm:text-sm text-[#28593D] font-semibold"
+            >
+              <span>{communityRemixNotice}</span>
+              <button
+                type="button"
+                onClick={() => setCommunityRemixNotice(null)}
+                className="shrink-0 min-h-[32px] px-2.5 rounded-lg bg-white border border-[#3B7A57]/30 text-xs font-extrabold text-[#28593D] hover:bg-[#FAF6F0] cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          )}
 
           <div
             role="tabpanel"
@@ -1640,6 +1796,7 @@ export default function HomePage() {
                 patternPieces={pattern.pieces}
                 activePieceId={activePieceId}
                 onActivePieceIdChange={setActivePieceId}
+                onCompartirCreacion={handleCompartirCreacion}
               />
             )}
 
@@ -1666,6 +1823,7 @@ export default function HomePage() {
                     patternPieces={pattern.pieces}
                     activePieceId={activePieceId}
                     onActivePieceIdChange={setActivePieceId}
+                    onCompartirCreacion={handleCompartirCreacion}
                   />
                 </div>
               </div>

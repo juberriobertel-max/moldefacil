@@ -6,6 +6,8 @@ import {
   FASHION_STYLES_CATALOG,
   FashionStylePreset,
 } from "@/lib/fashionStylesCatalog";
+import { decodificarConfigMoldeDesdeUrl } from "@/lib/community/patternBridge";
+import type { ConfigMoldeSerializado } from "@/lib/community/types";
 import { GarmentCategory, Measurements } from "@/lib/types";
 
 interface HomeQueryParamsSyncProps {
@@ -13,6 +15,10 @@ interface HomeQueryParamsSyncProps {
   onSelectCategory: (cat: GarmentCategory) => void;
   onUpdateMeasurements: (patch: Partial<Measurements>) => void;
   onSelectMode: (mode: "styles" | "scanner" | "template") => void;
+  onApplyCommunityConfig?: (
+    config: ConfigMoldeSerializado,
+    meta?: { remixTitle?: string; avisoVersion?: string }
+  ) => void;
 }
 
 const STYLE_ALIAS_MAP: Record<string, string> = {
@@ -68,6 +74,7 @@ export default function HomeQueryParamsSync({
   onSelectCategory,
   onUpdateMeasurements,
   onSelectMode,
+  onApplyCommunityConfig,
 }: HomeQueryParamsSyncProps) {
   const searchParams = useSearchParams();
   const appliedKeyRef = useRef<string>("");
@@ -76,6 +83,18 @@ export default function HomeQueryParamsSync({
     const queryKey = searchParams.toString();
     if (!queryKey || appliedKeyRef.current === queryKey) return;
     appliedKeyRef.current = queryKey;
+
+    const communityToken = searchParams.get("molde_comunidad");
+    if (communityToken && onApplyCommunityConfig) {
+      const decodificado = decodificarConfigMoldeDesdeUrl(communityToken);
+      if (decodificado.ok && decodificado.config) {
+        onApplyCommunityConfig(decodificado.config, {
+          remixTitle: searchParams.get("titulo") ?? undefined,
+          avisoVersion: decodificado.avisoVersion,
+        });
+        return;
+      }
+    }
 
     const estiloParam = searchParams.get("estilo")?.toLowerCase() ?? "";
     const prendaParam = searchParams.get("prenda")?.toLowerCase() ?? "";
@@ -118,6 +137,7 @@ export default function HomeQueryParamsSync({
     onSelectCategory,
     onUpdateMeasurements,
     onSelectMode,
+    onApplyCommunityConfig,
   ]);
 
   return null;

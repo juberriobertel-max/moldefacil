@@ -12,6 +12,7 @@ import {
   Layers,
   RotateCw,
   Scissors,
+  Share2,
   Sliders,
   Sparkles,
   User,
@@ -68,6 +69,7 @@ export interface Garment3DPreviewProps {
   patternPieces?: PatternPiece[];
   activePieceId?: string;
   onActivePieceIdChange?: (pieceId: string) => void;
+  onCompartirCreacion?: (capturaDataUrl: string) => void;
 }
 
 type VistaCamaraPreset = "frente" | "espalda" | "detalle";
@@ -250,6 +252,7 @@ export default function Garment3DPreview({
   patternPieces,
   activePieceId,
   onActivePieceIdChange,
+  onCompartirCreacion,
 }: Garment3DPreviewProps) {
   const contenedorRef = useRef<HTMLDivElement | null>(null);
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
@@ -1081,6 +1084,26 @@ export default function Garment3DPreview({
     document.body.removeChild(link);
   }, []);
 
+  const capturarYCompartirEnComunidad = useCallback(() => {
+    if (!onCompartirCreacion) return;
+    const m = motorRef.current;
+    if (!m) {
+      onCompartirCreacion("");
+      return;
+    }
+    m.renderer.render(m.scene, m.camera);
+    const glCanvas = m.renderer.domElement;
+    if (glCanvas.width === 0 || glCanvas.height === 0) {
+      onCompartirCreacion("");
+      return;
+    }
+    let dataUrl = glCanvas.toDataURL("image/webp", 0.86);
+    if (!dataUrl.startsWith("data:image/webp")) {
+      dataUrl = glCanvas.toDataURL("image/jpeg", 0.86);
+    }
+    onCompartirCreacion(dataUrl);
+  }, [onCompartirCreacion]);
+
   if (webglError) {
     return (
       <div
@@ -1185,6 +1208,18 @@ export default function Garment3DPreview({
             <Camera className="w-4 h-4 text-[#C85A32] shrink-0" />
             <span className="hidden sm:inline">Foto 3D</span>
           </button>
+          {onCompartirCreacion && (
+            <button
+              type="button"
+              onClick={capturarYCompartirEnComunidad}
+              aria-label="Compartir mi creación"
+              title="Compartir diseño y captura 3D en la Comunidad"
+              className="min-h-[44px] px-3 rounded-xl border border-[#3B7A57] bg-[#3B7A57] hover:bg-[#316649] text-xs font-extrabold text-white shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3B7A57] focus-visible:ring-offset-1"
+            >
+              <Share2 className="w-4 h-4 shrink-0" />
+              <span className="hidden md:inline">Compartir mi creación</span>
+            </button>
+          )}
         </div>
       </div>
 
