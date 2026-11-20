@@ -11,6 +11,7 @@ export interface ManiquiInstancia {
   actualizar: (perfil: PerfilCuerpo) => void;
   aplicarAcabado: (acabado: AcabadoManiqui3D) => void;
   mostrarCintasGuia: (visible: boolean) => void;
+  calibrarPerfilPrenda?: (perfilBase: PerfilCuerpo) => PerfilCuerpo;
 }
 
 const SEGMENTOS_RADIALES_TORSO = 48;

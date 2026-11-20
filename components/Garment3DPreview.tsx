@@ -296,6 +296,54 @@ export default function Garment3DPreview({
     }
   }, []);
 
+  const reconstruirPrendaEnMotor = useCallback(
+    (motor: EstadoMotor3D, perfil: PerfilCuerpo, nextConfig: ConfigPrenda) => {
+      const previa = motor.prendaActual;
+      motor.scene.remove(previa.grupo);
+      disposeObject(previa.grupo, {
+        preservarMateriales: motor.repoMateriales.materialesCompartidos(),
+        preservarTexturas: motor.repoMateriales.texturasCacheadas(),
+      });
+
+      const ap = aparienciaRef.current;
+      const nueva = construirMallaPrenda(perfil, nextConfig, {
+        nivelDetalle: motor.nivelDetalleActual,
+        materialPrincipal: motor.repoMateriales.obtenerMaterial(ap),
+        materialSecundario: motor.repoMateriales.obtenerMaterialSecundario(ap),
+        materialForroOVista: motor.repoMateriales.obtenerMaterialVista(ap),
+        mostrarCosturas: ap.mostrarCosturas,
+        ajusteTelaStretchM: PROPIEDADES_FISICAS_TELA[ap.tela].ajusteStretchM,
+      });
+      motor.maniqui.mostrarCintasGuia(
+        Boolean(ap.mostrarCosturas || ap.mostrarMapaCalce)
+      );
+      nueva.grupoCintasMetricas.visible = Boolean(
+        ap.mostrarCosturas || ap.mostrarMapaCalce
+      );
+      aplicarMapaCalceEnPrenda(
+        nueva.grupo,
+        perfil,
+        motor.repoMateriales.obtenerMaterialMapaCalce(),
+        Boolean(ap.mostrarMapaCalce)
+      );
+      if (!ap.mostrarMapaCalce) {
+        aplicarResaltadoPieza(
+          nueva.grupo,
+          activePieceIdRef.current,
+          motor.repoMateriales.obtenerMaterialResaltado(ap),
+          false
+        );
+      }
+
+      motor.scene.add(nueva.grupo);
+      motor.prendaActual = nueva;
+      motor.configActual = nextConfig;
+      setTriangulosUI(nueva.triangulosTotales);
+      return nueva;
+    },
+    []
+  );
+
   // Cierre de popover por tecla Escape o clic fuera de la barra inferior
   useEffect(() => {
     if (!popoverAbierto) return;
@@ -491,14 +539,16 @@ export default function Garment3DPreview({
       }
 
       const prevManiqui = motor.maniqui;
-      maniquiGlb.actualizar(motor.perfilActual);
-      maniquiGlb.aplicarAcabado(aparienciaRef.current.acabadoManiqui ?? "lino");
-      maniquiGlb.mostrarCintasGuia(
-        Boolean(
-          aparienciaRef.current.mostrarCosturas ||
-            aparienciaRef.current.mostrarMapaCalce
-        )
+      const perfilBase = getBodyProfile(
+        motor.medidasActual,
+        POSES_MANIQUI_3D[motor.poseActual]
       );
+      const perfilCalibrado = maniquiGlb.calibrarPerfilPrenda
+        ? maniquiGlb.calibrarPerfilPrenda(perfilBase)
+        : perfilBase;
+
+      maniquiGlb.actualizar(perfilCalibrado);
+      maniquiGlb.aplicarAcabado(aparienciaRef.current.acabadoManiqui ?? "lino");
       const esCartucheraActual =
         motor.configActual.subEstiloEspecial === "zipper_pouch";
       maniquiGlb.grupo.visible = !esCartucheraActual;
@@ -507,7 +557,23 @@ export default function Garment3DPreview({
       disposeObject(prevManiqui.grupo);
       scene.add(maniquiGlb.grupo);
       motor.maniqui = maniquiGlb;
-      solicitarRender(false);
+      motor.perfilActual = perfilCalibrado;
+
+      actualizarLimitesOrbitControls(motor.controls, perfilCalibrado);
+      reconstruirPrendaEnMotor(motor, perfilCalibrado, motor.configActual);
+
+      const poseCam = calcularPoseCamaraPreset(
+        "frente",
+        perfilCalibrado,
+        motor.configActual,
+        motor.camera.aspect
+      );
+      motor.camera.position.copy(poseCam.posicion);
+      motor.controls.target.copy(poseCam.target);
+      motor.controls.update();
+
+      ultimaProyeccionStrRef.current = "__dirty__";
+      solicitarRender(true);
     });
 
     const raycaster = new THREE.Raycaster();
@@ -586,46 +652,7 @@ export default function Garment3DPreview({
       const nuevoDetalle = calcularNivelDetalleViewport(w);
       if (nuevoDetalle !== motor.nivelDetalleActual) {
         motor.nivelDetalleActual = nuevoDetalle;
-        const mPrev = motor.prendaActual;
-        disposeObject(mPrev.grupo, {
-          preservarMateriales: motor.repoMateriales.materialesCompartidos(),
-          preservarTexturas: motor.repoMateriales.texturasCacheadas(),
-        });
-        motor.scene.remove(mPrev.grupo);
-        const nueva = construirMallaPrenda(motor.perfilActual, motor.configActual, {
-          nivelDetalle: nuevoDetalle,
-          materialPrincipal: motor.repoMateriales.obtenerMaterial(aparienciaRef.current),
-          materialSecundario: motor.repoMateriales.obtenerMaterialSecundario(
-            aparienciaRef.current
-          ),
-          materialForroOVista: motor.repoMateriales.obtenerMaterialVista(
-            aparienciaRef.current
-          ),
-          mostrarCosturas: aparienciaRef.current.mostrarCosturas,
-          ajusteTelaStretchM:
-            PROPIEDADES_FISICAS_TELA[aparienciaRef.current.tela].ajusteStretchM,
-        });
-        nueva.grupoCintasMetricas.visible = Boolean(
-          aparienciaRef.current.mostrarCosturas ||
-            aparienciaRef.current.mostrarMapaCalce
-        );
-        aplicarMapaCalceEnPrenda(
-          nueva.grupo,
-          motor.perfilActual,
-          motor.repoMateriales.obtenerMaterialMapaCalce(),
-          Boolean(aparienciaRef.current.mostrarMapaCalce)
-        );
-        if (!aparienciaRef.current.mostrarMapaCalce) {
-          aplicarResaltadoPieza(
-            nueva.grupo,
-            activePieceIdRef.current,
-            motor.repoMateriales.obtenerMaterialResaltado(aparienciaRef.current),
-            false
-          );
-        }
-        motor.scene.add(nueva.grupo);
-        motor.prendaActual = nueva;
-        setTriangulosUI(nueva.triangulosTotales);
+        reconstruirPrendaEnMotor(motor, motor.perfilActual, motor.configActual);
       }
       solicitarRender(false);
     });
@@ -786,7 +813,7 @@ export default function Garment3DPreview({
       renderer.domElement.remove();
       motorRef.current = null;
     };
-  }, [reinitTick, solicitarRender]);
+  }, [reinitTick, solicitarRender, reconstruirPrendaEnMotor]);
 
   // Actualización INSTANTÁNEA de material, textura, calce, maniquí y toggle de costuras
   useEffect(() => {
@@ -885,10 +912,12 @@ export default function Garment3DPreview({
         JSON.stringify(m.medidasActual) !== JSON.stringify(medidas) ||
         m.poseActual !== poseSolicitada;
 
-      const perfil = medidasOPoseCambiaron
-        ? getBodyProfile(medidas, POSES_MANIQUI_3D[poseSolicitada])
-        : m.perfilActual;
+      let perfil = m.perfilActual;
       if (medidasOPoseCambiaron) {
+        const perfilBase = getBodyProfile(medidas, POSES_MANIQUI_3D[poseSolicitada]);
+        perfil = m.maniqui.calibrarPerfilPrenda
+          ? m.maniqui.calibrarPerfilPrenda(perfilBase)
+          : perfilBase;
         m.maniqui.actualizar(perfil);
         actualizarLimitesOrbitControls(m.controls, perfil);
         m.perfilActual = perfil;
@@ -902,46 +931,7 @@ export default function Garment3DPreview({
       m.maniqui.grupo.visible = !esCartuchera;
       m.sombra.mesh.visible = !esCartuchera;
 
-      const previa = m.prendaActual;
-      m.scene.remove(previa.grupo);
-      disposeObject(previa.grupo, {
-        preservarMateriales: m.repoMateriales.materialesCompartidos(),
-        preservarTexturas: m.repoMateriales.texturasCacheadas(),
-      });
-
-      const ap = aparienciaRef.current;
-      const nueva = construirMallaPrenda(perfil, config, {
-        nivelDetalle: m.nivelDetalleActual,
-        materialPrincipal: m.repoMateriales.obtenerMaterial(ap),
-        materialSecundario: m.repoMateriales.obtenerMaterialSecundario(ap),
-        materialForroOVista: m.repoMateriales.obtenerMaterialVista(ap),
-        mostrarCosturas: ap.mostrarCosturas,
-        ajusteTelaStretchM: PROPIEDADES_FISICAS_TELA[ap.tela].ajusteStretchM,
-      });
-      m.maniqui.mostrarCintasGuia(
-        Boolean(ap.mostrarCosturas || ap.mostrarMapaCalce)
-      );
-      nueva.grupoCintasMetricas.visible = Boolean(
-        ap.mostrarCosturas || ap.mostrarMapaCalce
-      );
-      aplicarMapaCalceEnPrenda(
-        nueva.grupo,
-        perfil,
-        m.repoMateriales.obtenerMaterialMapaCalce(),
-        Boolean(ap.mostrarMapaCalce)
-      );
-      if (!ap.mostrarMapaCalce) {
-        aplicarResaltadoPieza(
-          nueva.grupo,
-          activePieceIdRef.current,
-          m.repoMateriales.obtenerMaterialResaltado(ap),
-          false
-        );
-      }
-
-      m.scene.add(nueva.grupo);
-      m.prendaActual = nueva;
-      m.configActual = config;
+      const nueva = reconstruirPrendaEnMotor(m, perfil, config);
 
       if (eraCartuchera !== esCartuchera) {
         const destino = calcularPoseCamaraPreset(
@@ -968,7 +958,7 @@ export default function Garment3DPreview({
         debounceTimerRef.current = null;
       }
     };
-  }, [medidas, config, apariencia.poseManiqui, solicitarRender]);
+  }, [medidas, config, apariencia.poseManiqui, solicitarRender, reconstruirPrendaEnMotor]);
 
   const irAVistaCamara = useCallback(
     (preset: VistaCamaraPreset) => {

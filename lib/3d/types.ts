@@ -246,6 +246,7 @@ export interface TrayectoriaPierna3D {
   radioRodillaM: number;
   radioTobilloM: number;
   largoPieM: number;
+  desplazamientoPantorrillaZM?: number;
 }
 
 export interface TrayectoriasCuerpo {

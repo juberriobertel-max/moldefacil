@@ -1,14 +1,25 @@
 import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
-import { evaluarPerfilEnY } from "./bodyProfile";
+import {
+  calcularPerimetroElipseM,
+  evaluarPerfilEnY,
+  interpolarAnillosTorso,
+} from "./bodyProfile";
 import { disposeObject } from "./disposal";
 import {
   ACABADOS_MANIQUI,
   crearGrupoCintasModisteria,
   ManiquiInstancia,
 } from "./mannequinBuilder";
-import { AcabadoManiqui3D, PerfilCuerpo } from "./types";
+import {
+  AcabadoManiqui3D,
+  AnilloPerfil,
+  NombreSeccionAnatomica,
+  PerfilCuerpo,
+  TrayectoriaBrazo3D,
+  TrayectoriaPierna3D,
+} from "./types";
 
 const URLS_MANIQUI_GLB: readonly string[] = [
   "/models/base-female.glb",
@@ -16,7 +27,8 @@ const URLS_MANIQUI_GLB: readonly string[] = [
   "https://raw.githubusercontent.com/opensegra/ai-library/main/public/assets/base-female.glb",
 ];
 const ALTURA_BASE_GLB_M = 1.766;
-const MARGEN_INTERIOR_PRENDA = 0.945;
+const Y_BASE_PISO_GLB = 0.0084;
+const MARGEN_INTERIOR_PRENDA = 0.925;
 
 interface SliceBaseGLB {
   y: number;
@@ -30,14 +42,15 @@ interface SliceBaseGLB {
  * de `base-female.glb` en pose T de referencia (altura 1.766 m).
  */
 const PERFIL_BASE_GLB: ReadonlyArray<SliceBaseGLB> = [
-  { y: 1.48, a: 0.165, b: 0.072, zMid: -0.02 },
-  { y: 1.4, a: 0.175, b: 0.112, zMid: -0.015 },
-  { y: 1.29, a: 0.141, b: 0.124, zMid: 0.016 },
-  { y: 1.2, a: 0.116, b: 0.094, zMid: 0.015 },
-  { y: 1.09, a: 0.142, b: 0.092, zMid: -0.003 },
-  { y: 0.95, a: 0.194, b: 0.118, zMid: -0.044 },
+  { y: 1.48, a: 0.167, b: 0.068, zMid: -0.048 },
+  { y: 1.41, a: 0.176, b: 0.109, zMid: -0.022 },
+  { y: 1.31, a: 0.148, b: 0.128, zMid: 0.012 },
+  { y: 1.24, a: 0.131, b: 0.101, zMid: 0.014 },
+  { y: 1.18, a: 0.112, b: 0.089, zMid: 0.017 },
+  { y: 1.05, a: 0.161, b: 0.111, zMid: -0.022 },
+  { y: 0.94, a: 0.194, b: 0.12, zMid: -0.043 },
   { y: 0.85, a: 0.205, b: 0.111, zMid: -0.025 },
-  { y: 0.72, a: 0.16, b: 0.095, zMid: -0.02 },
+  { y: 0.74, a: 0.201, b: 0.092, zMid: -0.019 },
 ];
 
 let cacheGltfPromise: Promise<GLTF | null> | null = null;
@@ -210,60 +223,12 @@ export async function cargarManiquiGLB(
   const EJE_Y = new THREE.Vector3(0, 1, 0);
   const EJE_Z = new THREE.Vector3(0, 0, 1);
 
-  const actualizar = (perfil: PerfilCuerpo) => {
+  const aplicarPoseEnHuesos = (perfil: PerfilCuerpo): number => {
     const escalaAltura = clamp(perfil.alturaTotalM / ALTURA_BASE_GLB_M, 0.52, 1.3);
     modeloClonado.scale.setScalar(escalaAltura);
     // Eleva mínimamente para apoyar talones/suelas sobre y = 0
-    modeloClonado.position.set(0, 0.0084 * escalaAltura, 0);
+    modeloClonado.position.set(0, Y_BASE_PISO_GLB * escalaAltura, 0);
 
-    // 1. Morfología radial suave del torso/cadera para encajar dentro de la prenda sin colisiones
-    if (cuerpoGeometry && baseBodyPositions) {
-      const posAttr = cuerpoGeometry.getAttribute("position") as THREE.BufferAttribute;
-      const count = posAttr.count;
-
-      for (let i = 0; i < count; i++) {
-        const bx = baseBodyPositions[i * 3];
-        const by = baseBodyPositions[i * 3 + 1];
-        const bz = baseBodyPositions[i * 3 + 2];
-
-        // Solo el bloque de torso/pelvis/cintura; los brazos en T (|bx| > 0.215) quedan intactos
-        const pesoY =
-          smoothstep(0.7, 0.84, by) * (1 - smoothstep(1.38, 1.48, by));
-        const pesoX = 1 - smoothstep(0.165, 0.215, Math.abs(bx));
-        const pesoTorso = pesoY * pesoX;
-
-        if (pesoTorso <= 0.001) {
-          posAttr.setXYZ(i, bx, by, bz);
-          continue;
-        }
-
-        const sliceBase = evaluarSliceBaseGLB(by);
-        const worldY = by * escalaAltura;
-        const target = evaluarPerfilEnY(perfil.anillosInterpolados, worldY);
-
-        const targetABind = (target.a * MARGEN_INTERIOR_PRENDA) / escalaAltura;
-        const targetBBind = (target.b * MARGEN_INTERIOR_PRENDA) / escalaAltura;
-        const targetDzBind = target.desplazamientoZ / escalaAltura;
-
-        const rx = targetABind / Math.max(0.04, sliceBase.a);
-        const rz = targetBBind / Math.max(0.04, sliceBase.b);
-
-        const fx = bx * rx;
-        const fz = targetDzBind + (bz - sliceBase.zMid) * rz;
-
-        posAttr.setXYZ(
-          i,
-          THREE.MathUtils.lerp(bx, fx, pesoTorso),
-          by,
-          THREE.MathUtils.lerp(bz, fz, pesoTorso)
-        );
-      }
-
-      posAttr.needsUpdate = true;
-      cuerpoGeometry.computeVertexNormals();
-    }
-
-    // 2. Restaurar pose T de referencia y aplicar pose articulada en espacio mundial
     for (const entry of huesosRest.values()) {
       entry.nodo.quaternion.copy(entry.q);
       entry.nodo.position.copy(entry.p);
@@ -291,11 +256,9 @@ export async function cargarManiquiGLB(
     const thighR = huesosRest.get("thigh_r")?.nodo;
     const calfL = huesosRest.get("calf_l")?.nodo;
     const calfR = huesosRest.get("calf_r")?.nodo;
-
     const footL = huesosRest.get("foot_l")?.nodo;
     const footR = huesosRest.get("foot_r")?.nodo;
 
-    // Postura de pasarela / cadera y piernas
     if (Math.abs(inclCaderaDeg) > 0.2) {
       rotarHuesoEnMundo(pelvis, EJE_Z, THREE.MathUtils.degToRad(inclCaderaDeg * 0.7));
       rotarHuesoEnMundo(spine01, EJE_Z, THREE.MathUtils.degToRad(-inclCaderaDeg * 0.35));
@@ -309,7 +272,6 @@ export async function cargarManiquiGLB(
       rotarHuesoEnMundo(thighR, EJE_X, THREE.MathUtils.degToRad(angPasoDeg * 0.7));
       rotarHuesoEnMundo(calfR, EJE_X, THREE.MathUtils.degToRad(angPasoDeg * 0.55));
     } else {
-      // Ligera apertura natural de piernas en pose A estable
       const aperturaDeg = clamp(pose.factorSeparacionPiesCadera * 4.5, 1.5, 4);
       rotarHuesoEnMundo(thighL, EJE_Z, THREE.MathUtils.degToRad(aperturaDeg));
       rotarHuesoEnMundo(thighR, EJE_Z, THREE.MathUtils.degToRad(-aperturaDeg));
@@ -320,13 +282,67 @@ export async function cargarManiquiGLB(
       rotarHuesoEnMundo(footR, EJE_Y, THREE.MathUtils.degToRad(-rotPieDeg * 0.6));
     }
 
-    // Bajar brazos desde T-pose al ángulo deseado y doblar suavemente codos hacia adelante
     rotarHuesoEnMundo(upperArmL, EJE_Z, THREE.MathUtils.degToRad(-bajarBrazoDeg));
     rotarHuesoEnMundo(upperArmR, EJE_Z, THREE.MathUtils.degToRad(bajarBrazoDeg));
     rotarHuesoEnMundo(lowerArmL, EJE_Y, THREE.MathUtils.degToRad(-codoFlexDeg));
     rotarHuesoEnMundo(lowerArmR, EJE_Y, THREE.MathUtils.degToRad(codoFlexDeg));
 
-    // 3. Actualizar cintas guía anatómicas (busto/cintura/cadera)
+    modeloClonado.updateMatrixWorld(true);
+    return escalaAltura;
+  };
+
+  const actualizar = (perfil: PerfilCuerpo) => {
+    const escalaAltura = aplicarPoseEnHuesos(perfil);
+
+    // 1. Morfología radial suave del torso/cadera para encajar dentro de la prenda sin colisiones
+    if (cuerpoGeometry && baseBodyPositions) {
+      const posAttr = cuerpoGeometry.getAttribute("position") as THREE.BufferAttribute;
+      const count = posAttr.count;
+
+      for (let i = 0; i < count; i++) {
+        const bx = baseBodyPositions[i * 3];
+        const by = baseBodyPositions[i * 3 + 1];
+        const bz = baseBodyPositions[i * 3 + 2];
+
+        // En zona superior (>1.28 m) excluimos brazos en T; en cadera/glúteos todo bx es torso
+        const pesoY =
+          smoothstep(0.68, 0.83, by) * (1 - smoothstep(1.38, 1.48, by));
+        const enZonaBrazos = smoothstep(1.28, 1.35, by);
+        const pesoX = 1 - enZonaBrazos * smoothstep(0.165, 0.215, Math.abs(bx));
+        const pesoTorso = pesoY * pesoX;
+
+        if (pesoTorso <= 0.001) {
+          posAttr.setXYZ(i, bx, by, bz);
+          continue;
+        }
+
+        const sliceBase = evaluarSliceBaseGLB(by);
+        const worldY = (by + Y_BASE_PISO_GLB) * escalaAltura;
+        const target = evaluarPerfilEnY(perfil.anillosInterpolados, worldY);
+
+        const targetABind = (target.a * MARGEN_INTERIOR_PRENDA) / escalaAltura;
+        const targetBBind = (target.b * MARGEN_INTERIOR_PRENDA) / escalaAltura;
+        const targetDzBind = target.desplazamientoZ / escalaAltura;
+
+        const rx = targetABind / Math.max(0.04, sliceBase.a);
+        const rz = targetBBind / Math.max(0.04, sliceBase.b);
+
+        const fx = bx * rx;
+        const fz = targetDzBind + (bz - sliceBase.zMid) * rz;
+
+        posAttr.setXYZ(
+          i,
+          THREE.MathUtils.lerp(bx, fx, pesoTorso),
+          by,
+          THREE.MathUtils.lerp(bz, fz, pesoTorso)
+        );
+      }
+
+      posAttr.needsUpdate = true;
+      cuerpoGeometry.computeVertexNormals();
+    }
+
+    // 2. Actualizar cintas guía anatómicas (busto/cintura/cadera)
     while (grupoCintasHost.children.length > 0) {
       const hijo = grupoCintasHost.children[0];
       grupoCintasHost.remove(hijo);
@@ -341,13 +357,207 @@ export async function cargarManiquiGLB(
     grupoCintasHost.add(cintas);
   };
 
-  actualizar(perfilInicial);
+  /**
+   * Calibra alturas clave, curvatura espinal y trayectorias óseas de brazos/piernas
+   * al maniquí `base-female.glb` posado para que todas las prendas ajusten sin perforaciones.
+   */
+  const calibrarPerfilPrenda = (perfilBase: PerfilCuerpo): PerfilCuerpo => {
+    const s = aplicarPoseEnHuesos(perfilBase);
+    grupo.updateMatrixWorld(true);
+    const invGrupo = grupo.matrixWorld.clone().invert();
+    const tmp = new THREE.Vector3();
+
+    const posBoneGrupo = (nombre: string): [number, number, number] | null => {
+      const hueso = huesosRest.get(nombre)?.nodo;
+      if (!hueso) return null;
+      hueso.getWorldPosition(tmp);
+      tmp.applyMatrix4(invGrupo);
+      return [tmp.x, tmp.y, tmp.z];
+    };
+
+    const crearAnilloCalibrado = (
+      nombre: NombreSeccionAnatomica,
+      yBind: number,
+      aMinBind: number,
+      bMinBind: number,
+      dzBind: number
+    ): AnilloPerfil => {
+      const base = perfilBase.anillosClave[nombre];
+      const a = Math.max(base.a, aMinBind * s);
+      const b = Math.max(base.b, bMinBind * s);
+      return {
+        y: (yBind + Y_BASE_PISO_GLB) * s,
+        a,
+        b,
+        desplazamientoZ: dzBind * s,
+        perimetroObjetivoCm: Number((calcularPerimetroElipseM(a, b) * 100).toFixed(2)),
+      };
+    };
+
+    const cuello = crearAnilloCalibrado("cuello", 1.485, 0.068, 0.064, -0.044);
+    const hombros = crearAnilloCalibrado("hombros", 1.418, 0.166, 0.106, -0.022);
+    const busto = crearAnilloCalibrado("busto", 1.308, 0.105, 0.088, 0.012);
+    const bajoBusto = crearAnilloCalibrado("bajoBusto", 1.235, 0.092, 0.072, 0.014);
+    const cintura = crearAnilloCalibrado("cintura", 1.18, 0.085, 0.066, 0.017);
+    const caderaAlta = crearAnilloCalibrado("caderaAlta", 1.048, 0.115, 0.082, -0.022);
+    const cadera = crearAnilloCalibrado("cadera", 0.935, 0.135, 0.088, -0.042);
+    const muslo = crearAnilloCalibrado("muslo", 0.665, 0.196, 0.096, -0.02);
+
+    const anillosClave: Record<NombreSeccionAnatomica, AnilloPerfil> = {
+      cuello,
+      hombros,
+      busto,
+      bajoBusto,
+      cintura,
+      caderaAlta,
+      cadera,
+      muslo,
+    };
+    const anillosInterpolados = interpolarAnillosTorso([
+      cuello,
+      hombros,
+      busto,
+      bajoBusto,
+      cintura,
+      caderaAlta,
+      cadera,
+      muslo,
+    ]);
+
+    const construirBrazoDesdeGLB = (lado: -1 | 1): TrayectoriaBrazo3D => {
+      const suf = lado < 0 ? "r" : "l";
+      const base =
+        lado < 0 ? perfilBase.trayectorias.brazoIzq : perfilBase.trayectorias.brazoDer;
+      const hombro = posBoneGrupo(`upperarm_${suf}`) ?? base.hombro;
+      const codo = posBoneGrupo(`lowerarm_${suf}`) ?? base.codo;
+      const muneca = posBoneGrupo(`hand_${suf}`) ?? base.muneca;
+
+      const dirMano = new THREE.Vector3(
+        muneca[0] - codo[0],
+        muneca[1] - codo[1],
+        muneca[2] - codo[2]
+      );
+      if (dirMano.lengthSq() > 1e-6) {
+        dirMano.normalize().multiplyScalar(base.largoManoM);
+      } else {
+        dirMano.set(0, -base.largoManoM, 0);
+      }
+
+      return {
+        lado,
+        hombro,
+        codo,
+        muneca,
+        manoFin: [
+          muneca[0] + dirMano.x,
+          muneca[1] + dirMano.y,
+          muneca[2] + dirMano.z,
+        ],
+        radioHombroM: Math.max(base.radioHombroM, 0.052 * s),
+        radioCodoM: Math.max(base.radioCodoM, 0.044 * s),
+        radioMunecaM: Math.max(base.radioMunecaM, 0.036 * s),
+        largoManoM: base.largoManoM,
+      };
+    };
+
+    const construirPiernaDesdeGLB = (lado: -1 | 1): TrayectoriaPierna3D => {
+      const suf = lado < 0 ? "r" : "l";
+      const base =
+        lado < 0 ? perfilBase.trayectorias.piernaIzq : perfilBase.trayectorias.piernaDer;
+      const thigh = posBoneGrupo(`thigh_${suf}`);
+      const calf = posBoneGrupo(`calf_${suf}`);
+      const foot = posBoneGrupo(`foot_${suf}`);
+
+      if (!thigh || !calf || !foot) {
+        return base;
+      }
+
+      const vThigh = new THREE.Vector3(...thigh);
+      const vCalf = new THREE.Vector3(...calf);
+      const vFoot = new THREE.Vector3(...foot);
+
+      const vCadera = vThigh.clone().lerp(vCalf, 0.16);
+      vCadera.z += 0.028 * s;
+
+      const vMusloAlto = vThigh.clone().lerp(vCalf, 0.42);
+      vMusloAlto.z += 0.018 * s;
+
+      const vRodilla = vCalf.clone();
+      vRodilla.z -= 0.018 * s;
+
+      const vTobillo = vFoot.clone();
+      vTobillo.y += 0.045 * s;
+      vTobillo.z -= 0.008 * s;
+
+      return {
+        lado,
+        cadera: [vCadera.x, vCadera.y, vCadera.z],
+        musloAlto: [vMusloAlto.x, vMusloAlto.y, vMusloAlto.z],
+        rodilla: [vRodilla.x, vRodilla.y, vRodilla.z],
+        tobillo: [vTobillo.x, vTobillo.y, vTobillo.z],
+        piePunta: [vTobillo.x + lado * 0.015 * s, 0.014 * s, vTobillo.z + base.largoPieM * 0.8],
+        radioCaderaM: Math.max(base.radioCaderaM, 0.094 * s),
+        radioMusloM: Math.max(base.radioMusloM, 0.096 * s),
+        radioRodillaM: Math.max(base.radioRodillaM, 0.065 * s),
+        radioTobilloM: Math.max(base.radioTobilloM, 0.042 * s),
+        largoPieM: base.largoPieM,
+        desplazamientoPantorrillaZM: -0.028 * s,
+      };
+    };
+
+    const armL = construirBrazoDesdeGLB(-1);
+    const armR = construirBrazoDesdeGLB(1);
+    const piernaIzq = construirPiernaDesdeGLB(-1);
+    const piernaDer = construirPiernaDesdeGLB(1);
+    const headPos = posBoneGrupo("Head");
+
+    const alturaRodillaM = (piernaIzq.rodilla[1] + piernaDer.rodilla[1]) * 0.5;
+    const alturaTobilloM = (piernaIzq.tobillo[1] + piernaDer.tobillo[1]) * 0.5;
+    const alturaTiroM = clamp(
+      cintura.y - (0.69 + Y_BASE_PISO_GLB) * s,
+      0.24 * s,
+      Math.max(0.28 * s, cintura.y - muslo.y - 0.015)
+    );
+
+    return {
+      ...perfilBase,
+      anillosClave,
+      anillosInterpolados,
+      alturaTiroM,
+      alturaRodillaM,
+      alturaTobilloM,
+      cuelloYM: cuello.y,
+      hombroYM: hombros.y,
+      bustoYM: busto.y,
+      cinturaYM: cintura.y,
+      caderaYM: cadera.y,
+      musloYM: muslo.y,
+      trayectorias: {
+        ...perfilBase.trayectorias,
+        alturaCabezaM: (ALTURA_BASE_GLB_M + Y_BASE_PISO_GLB) * s,
+        centroCabeza: headPos
+          ? [headPos[0], headPos[1] + 0.112 * s, headPos[2] + 0.018 * s]
+          : perfilBase.trayectorias.centroCabeza,
+        radioCabezaX: Math.max(perfilBase.trayectorias.radioCabezaX, 0.095 * s),
+        radioCabezaY: Math.max(perfilBase.trayectorias.radioCabezaY, 0.105 * s),
+        radioCabezaZ: Math.max(perfilBase.trayectorias.radioCabezaZ, 0.108 * s),
+        brazoIzq: armL,
+        brazoDer: armR,
+        piernaIzq,
+        piernaDer,
+      },
+    };
+  };
+
+  const perfilInicialCalibrado = calibrarPerfilPrenda(perfilInicial);
+  actualizar(perfilInicialCalibrado);
 
   return {
     grupo,
     materialesCompartidos: [materialCuerpo, materialDetalle, materialCinta],
     texturasCompartidas: [],
     actualizar,
+    calibrarPerfilPrenda,
     aplicarAcabado(acabado: AcabadoManiqui3D) {
       const cfg = ACABADOS_MANIQUI[acabado] ?? ACABADOS_MANIQUI.lino;
       materialCuerpo.color.setHex(cfg.cuerpo);
