@@ -28,6 +28,15 @@ export function esModeradoraOAdmin(actor: ActorSesion | null): boolean {
   return actor.rol === "moderadora" || actor.rol === "admin";
 }
 
+export function puedeEditarContenido(
+  actor: ActorSesion | null,
+  autoraId: string
+): boolean {
+  if (!actor || actor.suspendida) return false;
+  if (esModeradoraOAdmin(actor)) return true;
+  return actor.id === autoraId;
+}
+
 export function hayBloqueoEntre(
   actorId: string | undefined | null,
   otraUsuariaId: string,

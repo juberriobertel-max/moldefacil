@@ -154,10 +154,13 @@ export interface FotoPublicacion {
   exif_limpio: boolean;
 }
 
+export type TipoPublicacion = "molde_plataforma" | "moda_real";
+
 export interface PublicacionComunidad {
   id: string;
   slug: string;
   autora_id: string;
+  tipo_publicacion?: TipoPublicacion;
   titulo: string;
   descripcion: string;
   aprendizaje_nota: string;
@@ -166,7 +169,8 @@ export interface PublicacionComunidad {
   dificultad: 1 | 2 | 3 | 4 | 5;
   tiempo_horas: number;
   costo_aprox?: string;
-  config_molde: ConfigMoldeSerializado;
+  config_molde?: ConfigMoldeSerializado;
+  referencia_inspiracion?: string;
   version_config: number;
   captura_3d_url?: string;
   permiso_fotos_confirmado: true;

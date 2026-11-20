@@ -208,40 +208,54 @@ export const FotoPublicacionInputSchema = z.object({
   }),
 });
 
-export const CrearPublicacionSchema = z.object({
-  titulo: z
-    .string()
-    .trim()
-    .min(4, "Escribe un título claro de al menos 4 caracteres.")
-    .max(140, "El título es demasiado largo (máximo 140 caracteres)."),
-  descripcion: z.string().trim().max(2000).default(""),
-  aprendizaje_nota: z
-    .string()
-    .trim()
-    .min(5, "Cuéntanos qué aprendiste o qué cambiarías (mínimo 5 caracteres).")
-    .max(1000),
-  prenda: z.string().trim().min(2).max(60),
-  tela: z.string().trim().min(2).max(80),
-  dificultad: z.union([
-    z.literal(1),
-    z.literal(2),
-    z.literal(3),
-    z.literal(4),
-    z.literal(5),
-  ]),
-  tiempo_horas: z.number().positive().max(500),
-  costo_aprox: z.string().trim().max(60).optional(),
-  config_molde: ConfigMoldeSerializadoSchema,
-  captura_3d_url: z.string().trim().max(500).optional(),
-  permiso_fotos_confirmado: z.literal(true, {
-    error: "Debes confirmar que tienes permiso para compartir las fotos.",
-  }),
-  reto_id: z.string().uuid().optional(),
-  fotos: z
-    .array(FotoPublicacionInputSchema)
-    .min(1, "Sube al menos 1 foto de tu prenda.")
-    .max(6, "Máximo 6 fotos por publicación."),
-});
+export const CrearPublicacionSchema = z
+  .object({
+    tipo_publicacion: z
+      .enum(["molde_plataforma", "moda_real"])
+      .default("molde_plataforma"),
+    titulo: z
+      .string()
+      .trim()
+      .min(4, "Escribe un título claro de al menos 4 caracteres.")
+      .max(140, "El título es demasiado largo (máximo 140 caracteres)."),
+    descripcion: z.string().trim().max(2000).default(""),
+    aprendizaje_nota: z
+      .string()
+      .trim()
+      .min(5, "Cuéntanos qué aprendiste o qué cambiarías (mínimo 5 caracteres).")
+      .max(1000),
+    prenda: z.string().trim().min(2).max(60),
+    tela: z.string().trim().min(2).max(80),
+    dificultad: z.union([
+      z.literal(1),
+      z.literal(2),
+      z.literal(3),
+      z.literal(4),
+      z.literal(5),
+    ]),
+    tiempo_horas: z.number().positive().max(500),
+    costo_aprox: z.string().trim().max(60).optional(),
+    config_molde: ConfigMoldeSerializadoSchema.optional(),
+    referencia_inspiracion: z.string().trim().max(240).optional(),
+    captura_3d_url: z.string().trim().max(150_000).optional(),
+    permiso_fotos_confirmado: z.literal(true, {
+      error: "Debes confirmar que tienes permiso para compartir las fotos.",
+    }),
+    reto_id: z.string().uuid().optional(),
+    fotos: z
+      .array(FotoPublicacionInputSchema)
+      .min(1, "Sube al menos 1 foto de tu prenda.")
+      .max(6, "Máximo 6 fotos por publicación."),
+  })
+  .superRefine((val, ctx) => {
+    if (val.tipo_publicacion === "molde_plataforma" && !val.config_molde) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["config_molde"],
+        message: "Las publicaciones hechas con molde de la plataforma deben incluir la configuración del molde.",
+      });
+    }
+  });
 
 export const CrearComentarioSchema = z.object({
   publicacion_id: z.string().uuid(),
