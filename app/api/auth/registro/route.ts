@@ -20,7 +20,7 @@ import {
   VERSION_TERMINOS_ACTUAL,
 } from "@/lib/auth/serverAuth";
 import {
-  crearClienteSupabaseServidor,
+  crearClienteSupabaseParaRoute,
   estaSupabaseConfigurado,
 } from "@/lib/community/supabaseClient";
 
@@ -89,24 +89,14 @@ export async function POST(request: Request) {
     const ahoraIso = new Date().toISOString();
 
     if (estaSupabaseConfigurado()) {
-      const cookiesRespuesta: Array<{
-        name: string;
-        value: string;
-        options?: Record<string, unknown>;
-      }> = [];
-      const supa = crearClienteSupabaseServidor({
-        getAll: () => [],
-        setAll: (list) => {
-          cookiesRespuesta.push(...list);
-        },
-      });
-      if (supa) {
+      const cliente = crearClienteSupabaseParaRoute(request);
+      if (cliente) {
         const origin = new URL(request.url).origin;
-        await supa.auth.signUp({
+        await cliente.supa.auth.signUp({
           email: parsed.data.correo,
           password: parsed.data.contrasena,
           options: {
-            emailRedirectTo: `${origin}/cuenta?verificado=1`,
+            emailRedirectTo: `${origin}/api/auth/callback?next=${encodeURIComponent("/cuenta?verificado=1")}`,
             data: {
               nombre_publico: parsed.data.nombre_publico,
               acepto_terminos_en: ahoraIso,
@@ -117,11 +107,13 @@ export async function POST(request: Request) {
             },
           },
         });
-        return NextResponse.json({
-          ok: true,
-          mensaje: MENSAJE_NO_ENUMERANTE,
-          verificacionPendiente: true,
-        });
+        return cliente.aplicarCookies(
+          NextResponse.json({
+            ok: true,
+            mensaje: MENSAJE_NO_ENUMERANTE,
+            verificacionPendiente: true,
+          })
+        );
       }
     }
 

@@ -21,7 +21,7 @@ import {
   verificarHashScrypt,
 } from "@/lib/auth/serverAuth";
 import {
-  crearClienteSupabaseServidor,
+  crearClienteSupabaseParaRoute,
   estaSupabaseConfigurado,
 } from "@/lib/community/supabaseClient";
 
@@ -67,14 +67,26 @@ export async function POST(request: Request) {
 
     if (modo === "google_oauth") {
       if (estaSupabaseConfigurado()) {
-        const supa = crearClienteSupabaseServidor({ getAll: () => [] });
-        if (supa) {
+        const cliente = crearClienteSupabaseParaRoute(request);
+        if (cliente) {
           const origin = new URL(request.url).origin;
-          const { data } = await supa.auth.signInWithOAuth({
+          const { data, error } = await cliente.supa.auth.signInWithOAuth({
             provider: "google",
-            options: { redirectTo: `${origin}/cuenta` },
+            options: { redirectTo: `${origin}/api/auth/callback?next=/cuenta` },
           });
-          return NextResponse.json({ ok: true, redirectUrl: data.url });
+          if (error || !data?.url) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error:
+                  "Supabase Auth aún no tiene habilitado el proveedor Google OAuth.",
+              },
+              { status: 502 }
+            );
+          }
+          return cliente.aplicarCookies(
+            NextResponse.json({ ok: true, redirectUrl: data.url })
+          );
         }
       }
       return NextResponse.json(
@@ -96,13 +108,22 @@ export async function POST(request: Request) {
         );
       }
       if (estaSupabaseConfigurado()) {
-        const supa = crearClienteSupabaseServidor({ getAll: () => [] });
-        if (supa) {
+        const cliente = crearClienteSupabaseParaRoute(request);
+        if (cliente) {
           const origin = new URL(request.url).origin;
-          await supa.auth.signInWithOtp({
+          await cliente.supa.auth.signInWithOtp({
             email: correo,
-            options: { emailRedirectTo: `${origin}/cuenta` },
+            options: {
+              emailRedirectTo: `${origin}/api/auth/callback?next=/cuenta`,
+            },
           });
+          return cliente.aplicarCookies(
+            NextResponse.json({
+              ok: true,
+              mensaje:
+                "Si el correo existe en MoldeFácil, enviamos un enlace mágico de ingreso rápido.",
+            })
+          );
         }
       }
       return NextResponse.json({
@@ -132,17 +153,9 @@ export async function POST(request: Request) {
     }
 
     if (estaSupabaseConfigurado()) {
-      const cookiesRespuesta: Array<{
-        name: string;
-        value: string;
-        options?: Record<string, unknown>;
-      }> = [];
-      const supa = crearClienteSupabaseServidor({
-        getAll: () => [],
-        setAll: (list) => cookiesRespuesta.push(...list),
-      });
-      if (supa) {
-        const { data, error } = await supa.auth.signInWithPassword({
+      const cliente = crearClienteSupabaseParaRoute(request);
+      if (cliente) {
+        const { data, error } = await cliente.supa.auth.signInWithPassword({
           email: parsed.data.correo,
           password: parsed.data.contrasena,
         });
@@ -154,7 +167,9 @@ export async function POST(request: Request) {
           );
         }
         limpiarIntentosLoginExitoso(parsed.data.correo, ip);
-        return NextResponse.json({ ok: true, fuente: "supabase" });
+        return cliente.aplicarCookies(
+          NextResponse.json({ ok: true, fuente: "supabase" })
+        );
       }
     }
 
@@ -302,13 +317,13 @@ export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const alcance = searchParams.get("alcance") === "todos" ? "todos" : "actual";
 
-  if (estaSupabaseConfigurado()) {
-    const supa = crearClienteSupabaseServidor({ getAll: () => [] });
-    if (supa) {
-      await supa.auth.signOut({
-        scope: alcance === "todos" ? "global" : "local",
-      });
-    }
+  const clienteSupa = estaSupabaseConfigurado()
+    ? crearClienteSupabaseParaRoute(request)
+    : null;
+  if (clienteSupa) {
+    await clienteSupa.supa.auth.signOut({
+      scope: alcance === "todos" ? "global" : "local",
+    });
   }
 
   if (sesion) {
@@ -330,5 +345,5 @@ export async function DELETE(request: Request) {
 
   const resp = NextResponse.json({ ok: true, alcance });
   resp.headers.set("Set-Cookie", crearCookieHeaderCerrada());
-  return resp;
+  return clienteSupa ? clienteSupa.aplicarCookies(resp) : resp;
 }

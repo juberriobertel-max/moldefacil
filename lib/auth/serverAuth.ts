@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   crearClienteSupabaseServidor,
   estaSupabaseConfigurado,
+  parseCookiesRaw,
   type CookieStoreAdapter,
 } from "@/lib/community/supabaseClient";
 import {
@@ -370,21 +371,6 @@ export interface SesionAutenticada {
   fuente: "supabase" | "preview";
 }
 
-function parseCookiesRaw(cookieHeader: string | null): Array<{ name: string; value: string }> {
-  if (!cookieHeader) return [];
-  return cookieHeader
-    .split(";")
-    .map((p) => {
-      const idx = p.indexOf("=");
-      if (idx < 0) return null;
-      return {
-        name: p.slice(0, idx).trim(),
-        value: decodeURIComponent(p.slice(idx + 1).trim()),
-      };
-    })
-    .filter((x): x is { name: string; value: string } => x !== null);
-}
-
 /**
  * Obtiene la sesión autenticada real en el servidor desde Supabase Auth o desde la cookie httpOnly firmada.
  */
@@ -402,14 +388,19 @@ export async function obtenerSesionServidor(
       const { data, error } = await supa.auth.getUser();
       if (!error && data.user) {
         const meta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
+        const nombreMeta =
+          typeof meta.nombre_publico === "string" && meta.nombre_publico.trim()
+            ? meta.nombre_publico.trim()
+            : typeof meta.full_name === "string" && meta.full_name.trim()
+              ? meta.full_name.trim()
+              : typeof meta.name === "string" && meta.name.trim()
+                ? meta.name.trim()
+                : "Modista";
         return {
           usuariaId: data.user.id,
           sesionId: `supa_${data.user.id.slice(0, 8)}`,
           correo: data.user.email ?? "",
-          nombrePublico:
-            typeof meta.nombre_publico === "string"
-              ? meta.nombre_publico
-              : "Modista",
+          nombrePublico: nombreMeta,
           usuarioUnico:
             typeof meta.usuario_unico === "string"
               ? meta.usuario_unico
