@@ -55,7 +55,8 @@ import {
   getDefaultPinsForCategory,
   solveTracingProportions,
 } from "@/lib/proportionSolver";
-import { computeTilingGrid, exportPatternToPdf } from "@/lib/pdfExporter";
+import { computeTilingGrid, exportPatternToPdf, exportPatternToSvg } from "@/lib/pdfExporter";
+import { resolveProMeasurements } from "@/lib/seamValidator";
 import { generateSewingGuide } from "@/lib/sewingGuideGenerator";
 import SmartGarmentScanner from "@/components/SmartGarmentScanner";
 import FashionStylesGallery from "@/components/FashionStylesGallery";
@@ -285,6 +286,7 @@ export default function HomePage() {
   const [paperFormat, setPaperFormat] = useState<PaperFormat>("letter");
   const [activePieceId, setActivePieceId] = useState<string>("all");
   const [showSheetGrid, setShowSheetGrid] = useState<boolean>(false);
+  const [showProMeasurements, setShowProMeasurements] = useState<boolean>(false);
 
   const [vistaPatron, setVistaPatron] = useState<"2d" | "3d" | "dividida">("2d");
   const [apariencia3D, setApariencia3D] = useState<Apariencia>(() => ({
@@ -1470,6 +1472,165 @@ export default function HomePage() {
                   ))}
                 </div>
 
+                {/* Optional Pro Measurements ("Modo Taller") Accordion */}
+                {category !== "accessories" && (
+                  <div className="rounded-2xl border border-slate-200 bg-[#FAF8F5] overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowProMeasurements((s) => !s)}
+                      className="w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-slate-100/60 transition cursor-pointer"
+                    >
+                      <div>
+                        <span className="block text-sm font-bold text-slate-800">
+                          Medidas Avanzadas — Modo Taller (Opcional)
+                        </span>
+                        <span className="block text-[11px] text-slate-500">
+                          Auto-calculadas si se dejan vacías (talle del., pinza busto, bíceps)
+                        </span>
+                      </div>
+                      {showProMeasurements ? (
+                        <ChevronUp className="h-4 w-4 text-slate-500 shrink-0" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-slate-500 shrink-0" />
+                      )}
+                    </button>
+
+                    {showProMeasurements && (
+                      <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-200 space-y-2.5">
+                        {(() => {
+                          const autoPro = resolveProMeasurements(measurements);
+                          const proFields: Array<{
+                            key: keyof Pick<
+                              Measurements,
+                              | "frontBodiceLength"
+                              | "bustHeight"
+                              | "bustSeparation"
+                              | "bicep"
+                              | "wrist"
+                              | "hipHeight"
+                            >;
+                            label: string;
+                            autoVal: number;
+                            min: number;
+                            max: number;
+                            show: boolean;
+                          }> = [
+                            {
+                              key: "frontBodiceLength",
+                              label: "Talle delantero",
+                              autoVal: autoPro.frontBodiceLength,
+                              min: 24,
+                              max: 62,
+                              show: showUpperBodyControls,
+                            },
+                            {
+                              key: "bustHeight",
+                              label: "Altura de busto",
+                              autoVal: autoPro.bustHeight,
+                              min: 16,
+                              max: 42,
+                              show: showUpperBodyControls,
+                            },
+                            {
+                              key: "bustSeparation",
+                              label: "Separación de busto",
+                              autoVal: autoPro.bustSeparation,
+                              min: 12,
+                              max: 30,
+                              show: showUpperBodyControls,
+                            },
+                            {
+                              key: "bicep",
+                              label: "Contorno de bíceps",
+                              autoVal: autoPro.bicep,
+                              min: 18,
+                              max: 56,
+                              show: showUpperBodyControls,
+                            },
+                            {
+                              key: "wrist",
+                              label: "Contorno de puño",
+                              autoVal: autoPro.wrist,
+                              min: 13,
+                              max: 28,
+                              show: showUpperBodyControls,
+                            },
+                            {
+                              key: "hipHeight",
+                              label: "Alto de cadera",
+                              autoVal: autoPro.hipHeight,
+                              min: 12,
+                              max: 28,
+                              show: true,
+                            },
+                          ];
+                          return (
+                            <>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {proFields
+                                  .filter((pf) => pf.show)
+                                  .map((pf) => (
+                                    <div
+                                      key={pf.key}
+                                      className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200"
+                                    >
+                                      <label
+                                        htmlFor={`pro-${pf.key}`}
+                                        className="text-xs font-semibold text-slate-700"
+                                      >
+                                        {pf.label}
+                                      </label>
+                                      <div className="flex items-center gap-1">
+                                        <input
+                                          id={`pro-${pf.key}`}
+                                          type="number"
+                                          step="0.5"
+                                          min={pf.min}
+                                          max={pf.max}
+                                          placeholder={String(pf.autoVal)}
+                                          value={measurements[pf.key] ?? ""}
+                                          onChange={(e) => {
+                                            const raw = e.target.value;
+                                            setMeasurements({
+                                              ...measurements,
+                                              [pf.key]:
+                                                raw === "" ? undefined : Number(raw),
+                                            });
+                                          }}
+                                          className="w-14 text-right text-xs font-bold text-slate-900 focus:outline-none"
+                                        />
+                                        <span className="text-[11px] text-slate-400">
+                                          cm
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setMeasurements({
+                                    ...measurements,
+                                    frontBodiceLength: undefined,
+                                    bustHeight: undefined,
+                                    bustSeparation: undefined,
+                                    bicep: undefined,
+                                    wrist: undefined,
+                                    hipHeight: undefined,
+                                  })
+                                }
+                                className="text-xs font-semibold text-teal-700 hover:underline cursor-pointer"
+                              >
+                                Restablecer valores automáticos
+                              </button>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {category !== "accessories" && (
                   <QuickLengthSelector
                     quickLength={quickLength}
@@ -1603,7 +1764,9 @@ export default function HomePage() {
                     Paso 3: Descargar e Imprimir
                   </h2>
                   <p className="text-sm text-slate-500">
-                    Hoja {paperFormat === "letter" ? "Carta" : "A4"} • {totalSheetPages} hojas
+                    {paperFormat === "projector"
+                      ? "Proyector • 1 lámina continua"
+                      : `${paperFormat === "letter" ? "Carta" : paperFormat === "a4" ? "A4" : "Ploter A0"} • ${totalSheetPages} hoja(s)`}
                   </p>
                 </div>
               </div>
@@ -1615,7 +1778,7 @@ export default function HomePage() {
             </button>
 
             <div className="px-5 pb-5 pt-2 border-t border-slate-100 space-y-4">
-              {/* Paper Size Visual Selector */}
+              {/* Paper Size Visual Selector (4 formatos profesionales) */}
               <div className="grid grid-cols-2 gap-2.5">
                 {(
                   [
@@ -1629,6 +1792,16 @@ export default function HomePage() {
                       title: "Hoja A4",
                       sub: "21.0 × 29.7 cm",
                     },
+                    {
+                      id: "a0",
+                      title: "Ploter A0",
+                      sub: "84.1 × 118.9 cm",
+                    },
+                    {
+                      id: "projector",
+                      title: "Proyector",
+                      sub: "Sin cortes • Alto contraste",
+                    },
                   ] as const
                 ).map((fmt) => (
                   <button
@@ -1641,7 +1814,7 @@ export default function HomePage() {
                         : "bg-[#FAF8F5] border-slate-200 text-slate-700 hover:border-slate-300"
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 text-base font-bold">
+                    <div className="flex items-center gap-1.5 text-sm sm:text-base font-bold">
                       <FileText className="h-4 w-4 shrink-0" />
                       {fmt.title}
                     </div>
@@ -1657,7 +1830,9 @@ export default function HomePage() {
                 <div className="flex items-center justify-between">
                   <span className="text-slate-600">Hojas para imprimir:</span>
                   <strong className="text-slate-900">
-                    {totalSheetPages} hojas
+                    {paperFormat === "projector"
+                      ? "1 lámina continua"
+                      : `${totalSheetPages} hojas`}
                   </strong>
                 </div>
                 <div className="flex items-center justify-between">
@@ -1679,6 +1854,15 @@ export default function HomePage() {
               >
                 <Download className="h-5 w-5" />
                 Descargar Molde en PDF (Gratis)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => exportPatternToSvg(pattern, seamAllowance)}
+                className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-[#FAF8F5] hover:bg-slate-100 border border-slate-300 text-slate-800 text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <Download className="h-4 w-4 text-teal-700" />
+                Descargar SVG 1:1 (Ploter / Cricut)
               </button>
             </div>
           </section>
@@ -1974,6 +2158,152 @@ export default function HomePage() {
             </div>
           </div>
 
+          {/* Ficha Técnica: Medidas Terminadas, Validación de Costuras y Plano de Corte */}
+          <div
+            data-testid="technical-spec-card"
+            className="rounded-3xl bg-white border border-slate-200 p-5 shadow-xs space-y-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Ficha Técnica, Auditoría de Costuras y Plano de Corte (140 cm)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Márgenes por borde: Doblez 0 cm • Curvas/Sisas 1 cm • Costados {seamAllowance} cm • Ruedo 3 cm
+                </p>
+              </div>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                  pattern.seamValidation?.verified
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                    : "bg-amber-50 text-amber-800 border-amber-200"
+                }`}
+              >
+                {pattern.seamValidation?.verified ? "Empate exacto verificado" : "Revisar tolerancias"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {/* Tabla Cuerpo vs Prenda Terminada */}
+              {pattern.finishedMeasurements && pattern.finishedMeasurements.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                  <div className="bg-slate-50 px-3.5 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-700 border-b border-slate-200">
+                    Medidas de la Prenda Terminada
+                  </div>
+                  <div className="divide-y divide-slate-100 text-xs">
+                    <div className="grid grid-cols-4 px-3.5 py-2 font-bold text-slate-500 bg-white">
+                      <span className="col-span-1">Zona</span>
+                      <span className="text-right">Cuerpo</span>
+                      <span className="text-right">Holgura</span>
+                      <span className="text-right">Terminada</span>
+                    </div>
+                    {pattern.finishedMeasurements.map((fm, idx) => (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-4 px-3.5 py-2 text-slate-700 bg-white"
+                      >
+                        <span className="font-semibold text-slate-900">{fm.label}</span>
+                        <span className="text-right">{fm.bodyCm} cm</span>
+                        <span className="text-right text-teal-700 font-semibold">
+                          {fm.easeCm >= 0 ? `+${fm.easeCm}` : fm.easeCm} cm
+                        </span>
+                        <span className="text-right font-extrabold text-slate-900">
+                          {fm.finishedCm} cm
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Verificación real de costuras */}
+              {pattern.seamValidation?.checks && pattern.seamValidation.checks.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-[#FAF8F5] p-3.5 space-y-2">
+                  <span className="block text-xs font-extrabold uppercase tracking-wide text-slate-700">
+                    Comprobación Geométrica de Costuras
+                  </span>
+                  <div className="space-y-1.5">
+                    {pattern.seamValidation.checks.map((chk) => (
+                      <div
+                        key={chk.id}
+                        className="flex items-start justify-between gap-2 text-xs bg-white rounded-xl px-3 py-2 border border-slate-200"
+                      >
+                        <div>
+                          <div className="font-bold text-slate-900">{chk.label}</div>
+                          <div className="text-slate-500">{chk.detail}</div>
+                        </div>
+                        <span
+                          className={`shrink-0 px-2 py-0.5 rounded-full font-bold ${
+                            chk.passed
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {chk.passed ? "OK" : `${chk.diffMm} mm`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Visual Cutting Layout on 140 cm fabric */}
+            {pattern.cuttingLayout && pattern.cuttingLayout.items.length > 0 && (
+              <div className="rounded-2xl border border-slate-200 bg-[#FAF8F5] p-3.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-extrabold uppercase tracking-wide text-slate-700">
+                    Plano de Corte Sugerido ({pattern.cuttingLayout.openWidthUsed ? "Tela abierta 140 cm" : "Tela doblada (70 cm útil)"})
+                  </span>
+                  <span className="font-bold text-teal-800">
+                    Largo usado: {pattern.cuttingLayout.usedLengthCm} cm ({pattern.fabricConsumption.width140m.toFixed(2)} m)
+                  </span>
+                </div>
+                <svg
+                  viewBox={`0 0 ${Math.max(80, pattern.cuttingLayout.usedLengthCm)} ${pattern.cuttingLayout.foldedWidthCm}`}
+                  className="w-full h-36 bg-white rounded-xl border border-slate-200"
+                >
+                  <line
+                    x1={0}
+                    y1={0.5}
+                    x2={Math.max(80, pattern.cuttingLayout.usedLengthCm)}
+                    y2={0.5}
+                    stroke="#E11D48"
+                    strokeWidth="0.9"
+                    strokeDasharray="3 1.5"
+                  />
+                  {pattern.cuttingLayout.items.map((item, idx) => (
+                    <g key={`${item.pieceId}-${item.copyIndex}-${idx}`}>
+                      <rect
+                        x={item.y}
+                        y={item.x}
+                        width={item.h}
+                        height={item.w}
+                        fill="#F5EFE3"
+                        stroke="#334155"
+                        strokeWidth="0.45"
+                        rx="0.6"
+                      />
+                      {item.h > 12 && item.w > 7 && (
+                        <text
+                          x={item.y + item.h / 2}
+                          y={item.x + item.w / 2}
+                          fontSize="3.4"
+                          fontWeight="bold"
+                          fill="#0F172A"
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                        >
+                          {item.label}
+                        </text>
+                      )}
+                    </g>
+                  ))}
+                </svg>
+              </div>
+            )}
+          </div>
+
           {/* LOCATION 1: Responsive Bottom Banner (320x50 Mobile / 728x90 Desktop) */}
           <div className="flex justify-center md:hidden w-full">
             <AdBanner
@@ -1997,8 +2327,16 @@ export default function HomePage() {
         isOpen={isDownloadModalOpen}
         onClose={() => setIsDownloadModalOpen(false)}
         onTriggerDownload={triggerPdfDownload}
-        paperLabel={paperFormat === "letter" ? "Carta" : "A4"}
-        pageCount={totalSheetPages + 2}
+        paperLabel={
+          paperFormat === "letter"
+            ? "Carta"
+            : paperFormat === "a4"
+              ? "A4"
+              : paperFormat === "a0"
+                ? "Ploter A0"
+                : "Proyector"
+        }
+        pageCount={paperFormat === "projector" ? 1 : totalSheetPages + 2}
       />
     </div>
   );

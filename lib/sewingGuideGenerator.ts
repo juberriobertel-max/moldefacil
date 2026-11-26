@@ -244,33 +244,57 @@ export function generateSewingGuide(pattern: PatternResult): SewingGuide {
   // 5. CATEGORÍAS CLÁSICAS (Top, Chaqueta, Vestido, Falda, Pantalón, Conjunto)
   const hasTailoredLapel = pieceIds.has("tailored_collar_top") || pieceIds.has("lapel_facing");
   const hasWrap = pieceIds.has("wrap_facing");
+  const hasShirtCollar = pieceIds.has("collar_stand") || pieceIds.has("shirt_collar");
+  const hasFly = pieceIds.has("fly_facing");
+  const hasTwoPieceSleeve = pieceIds.has("upper_sleeve") && pieceIds.has("under_sleeve");
+  const isSemicircular = label.includes("semicircular");
+  const hasInterfacing = pattern.pieces.some((p) => (p.interfacingQuantity ?? 0) > 0);
 
   return {
     title: `Guía de Confección — ${pattern.subStyleLabel}`,
-    difficulty: hasTailoredLapel ? "Avanzado (Sastrería)" : "Intermedio",
+    difficulty:
+      hasTailoredLapel || hasTwoPieceSleeve
+        ? "Avanzado (Sastrería)"
+        : "Intermedio",
     recommendedFabrics:
       pattern.category === "pants"
         ? ["Gabardina, lino sastre, crepé pesado o dril con caída"]
         : hasTailoredLapel
           ? ["Paño liviano, lino sastre, gabardina, crepé sastre y entretela fusionable"]
-          : ["Popelina de algodón, lino, viscosa, chalis o crepé fluido"],
+          : isSemicircular
+            ? ["Crepé fluido, chalis, viscosa, satén o gasa con forro"]
+            : ["Popelina de algodón, lino, viscosa, chalis o crepé fluido"],
     notions: [
       hasTailoredLapel
-        ? "Entretela sastre para Vista de Solapa y Cuello Inferior + 2 botones"
-        : hasWrap
-          ? "Entretela liviana para Vista de Escote Cruzado"
-          : "Cierre o botones según abertura + hilo al tono",
+        ? "Entretela sastre fusionable para Vista de Solapa y Cuello + 2 botones"
+        : hasShirtCollar
+          ? "Entretela liviana para Pie de Cuello, Cuello y Puños + 6 botones de camisa"
+          : hasFly
+            ? "Cierre metálico/nylon de 18 cm, botón/gancho de pantalón y entretela para pretina/aleta"
+            : hasWrap
+              ? "Entretela liviana para Vista de Escote Cruzado"
+              : hasInterfacing
+                ? "Entretela liviana para vistas/pretina + cierre o botones según abertura"
+                : "Hilo al tono + cierre invisible si aplica",
     ],
     steps: [
       hasTailoredLapel
-        ? "1. Cose las pinzas verticales de entalle en Delantero y Espalda, y fusiona entretela en la Vista de Solapa y el Cuello Inferior."
-        : "1. Une las piezas principales (Delantero y Trasero) por hombros y costados haciendo coincidir los piquetes.",
-      pieceIds.has("sleeve")
-        ? "2. Cose la Manga haciendo coincidir el piquete de copa con el hombro; el validador ya calculó el embebido exacto (+1.25 cm)."
-        : "2. Termina los bordes de sisa/escote con su vista correspondiente y plancha las costuras abiertas.",
+        ? "1. Cose las pinzas de busto (planchando hacia abajo) y pinzas verticales de entalle (hacia el centro), y fusiona entretela en Vista de Solapa y Cuello Inferior."
+        : hasFly
+          ? "1. Cose pinzas traseras planchando hacia el centro, arma los bolsillos italianos con su vista e instala la aleta y aletilla de cierre en el delantero."
+          : isSemicircular
+            ? "1. Une costados y centro espalda instalando cierre invisible (margen 2 cm). Coloca la pretina con entretela y deja colgar la falda 24 h al bies antes de emparejar el ruedo."
+            : "1. Cose primero las pinzas de busto (hacia abajo) y pinzas de cintura (hacia el centro); luego une hombros y costados haciendo coincidir piquetes (1 delantero, 2 espalda).",
+      hasTwoPieceSleeve
+        ? "2. Arma la manga sastre uniendo Hoja Superior e Inferior por codo y costura interna, pasa embebido en copa y pega haciendo coincidir piquetes 1 del. / 2 esp."
+        : pieceIds.has("sleeve")
+          ? `2. Pasa doble pespunte de embebido en la copa de la manga${pieceIds.has("shirt_cuff") ? ", arma la portañuela y pega el puño con entretela" : ""} y encaja piquetes (1 delantero, 2 espalda).`
+          : hasShirtCollar
+            ? "2. Fusiona entretela en Pie de Cuello y Cuello Superior, ármalos y únelos al escote haciendo coincidir piquetes de hombro y centro."
+            : "2. Fusiona entretela en las vistas anatómicas de escote o pretina, une por hombros y asienta con pespunte invisible.",
       pieceIds.has("pocket_bag") || pieceIds.has("pocket_flap")
-        ? "3. Instala los bolsillos siguiendo los piquetes laterales o el recuadro de ubicación de solapa."
-        : "3. Realiza la prueba de ajuste y termina el ruedo o pretina inferior.",
+        ? "3. Instala los bolsillos siguiendo los piquetes laterales y realiza la prueba de ajuste antes de cerrar el ruedo (3 cm)."
+        : "3. Realiza la prueba de ajuste, cose las aberturas traseras o portañuelas si aplica y asienta los ruedos con plancha.",
     ],
   };
 }
