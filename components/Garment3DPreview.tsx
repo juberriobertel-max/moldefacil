@@ -1786,7 +1786,7 @@ export default function Garment3DPreview({
           >
             <RotateCw
               className={`w-4 h-4 shrink-0 ${autoGirar ? "animate-spin" : ""}`}
-              style={autoGirar ? { animationDuration: "5s" : undefined } : undefined}
+              style={autoGirar ? { animationDuration: "5s" } : undefined}
             />
             <span>Girar 360°</span>
           </button>
