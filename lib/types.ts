@@ -39,7 +39,9 @@ export type NecklineStyle =
 export type SleeveStyle = "sleeveless" | "short" | "long" | "kimono";
 export type TorsoFit = "fitted" | "loose";
 
-export type PaperFormat = "letter" | "a4";
+export type PaperFormat = "letter" | "a4" | "a0" | "projector";
+
+export type EdgeAllowanceKind = "fold" | "curve" | "seam" | "zipper" | "hem";
 
 export interface Point2D {
   x: number;
@@ -59,20 +61,27 @@ export interface Measurements {
   inseam: number;
   hemWidth: number;
   headCircumference?: number;
+  // Optional Pro ("Modo Taller") anatomical measurements
+  frontBodiceLength?: number;
+  bustHeight?: number;
+  bustSeparation?: number;
+  bicep?: number;
+  wrist?: number;
+  hipHeight?: number;
 }
 
 export type PathCommand =
   | { type: "M"; x: number; y: number }
   | { type: "L"; x: number; y: number }
   | {
-      type: "C";
-      cp1x: number;
-      cp1y: number;
-      cp2x: number;
-      cp2y: number;
-      x: number;
-      y: number;
-    }
+    type: "C";
+    cp1x: number;
+    cp1y: number;
+    cp2x: number;
+    cp2y: number;
+    x: number;
+    y: number;
+  }
   | { type: "Z" };
 
 export interface PatternNotch {
@@ -80,13 +89,29 @@ export interface PatternNotch {
   y: number;
   angle: number;
   label?: string;
+  count?: 1 | 2 | 3;
+  kind?: "v" | "t" | "slit";
 }
 
 export interface PatternInternalLine {
   commands: PathCommand[];
-  style: "dart" | "fold" | "mark";
+  style: "dart" | "fold" | "mark" | "button" | "buttonhole" | "zipper";
   label?: string;
   labelPos?: Point2D;
+}
+
+export interface PieceSeamAnchors {
+  shoulder?: number;
+  sideSeam?: number;
+  armhole?: number;
+  neckline?: number;
+  waist?: number;
+  inseam?: number;
+  outseam?: number;
+  sleeveCap?: number;
+  sleeveCapTargetEase?: [number, number];
+  waistband?: number;
+  collarBase?: number;
 }
 
 export interface PatternPiece {
@@ -108,6 +133,11 @@ export interface PatternPiece {
   labelMaxSpanCm?: number;
   labelBandWidthCm?: number;
   foldLine?: { x1: number; y1: number; x2: number; y2: number };
+  edgeAllowances?: Record<number, number | EdgeAllowanceKind>;
+  cutQuantity?: number;
+  cutOnFold?: boolean;
+  interfacingQuantity?: number;
+  seamAnchors?: PieceSeamAnchors;
 }
 
 export interface SeamCheckItem {
@@ -125,6 +155,32 @@ export interface SeamValidationReport {
   stabilizedNotes?: string[];
 }
 
+export interface FinishedMeasurementSpec {
+  label: string;
+  bodyCm: number;
+  easeCm: number;
+  finishedCm: number;
+}
+
+export interface CuttingLayoutItem {
+  pieceId: string;
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  onFold?: boolean;
+  copyIndex: number;
+}
+
+export interface CuttingLayout {
+  rollWidthCm: number;
+  foldedWidthCm: number;
+  usedLengthCm: number;
+  openWidthUsed?: boolean;
+  items: CuttingLayoutItem[];
+}
+
 export interface PatternResult {
   category: GarmentCategory;
   subStyleLabel: string;
@@ -139,6 +195,8 @@ export interface PatternResult {
   };
   appliedEaseLabel: string;
   seamValidation?: SeamValidationReport;
+  finishedMeasurements?: FinishedMeasurementSpec[];
+  cuttingLayout?: CuttingLayout;
 }
 
 export interface TracingPins {

@@ -16,6 +16,13 @@ interface PatternCanvasProps {
   onToggleSheetGrid: () => void;
 }
 
+const PAPER_NAME_MAP: Record<PaperFormat, string> = {
+  letter: "Carta",
+  a4: "A4",
+  a0: "A0 (Ploter)",
+  projector: "Proyector",
+};
+
 export default function PatternCanvas({
   pattern,
   seamAllowance,
@@ -66,9 +73,11 @@ export default function PatternCanvas({
   const viewX = -padCm + pan.x + (baseW - viewW) / 2;
   const viewY = -padCm + pan.y + (baseH - viewH) / 2;
 
+  const isVerified = pattern.seamValidation?.verified ?? true;
+
   return (
     <div className="flex flex-col h-full bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
-      {/* Simplified, Large-Button Canvas Toolbar */}
+      {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 bg-white border-b border-slate-200">
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -146,7 +155,7 @@ export default function PatternCanvas({
         </div>
       </div>
 
-      {/* White / Butcher-Paper Cutting Mat */}
+      {/* Butcher-Paper Cutting Mat */}
       <div
         className="relative flex-1 min-h-[480px] bg-[#FFFDF9] overflow-hidden select-none"
         onWheel={(e) => {
@@ -234,7 +243,11 @@ export default function PatternCanvas({
                     y={tile.yCm}
                     width={tile.widthCm}
                     height={tile.heightCm}
-                    fill={tile.isEmpty ? "rgba(148, 163, 184, 0.08)" : "rgba(217, 119, 6, 0.05)"}
+                    fill={
+                      tile.isEmpty
+                        ? "rgba(148, 163, 184, 0.08)"
+                        : "rgba(217, 119, 6, 0.05)"
+                    }
                     stroke={tile.isEmpty ? "#94A3B8" : "#D97706"}
                     strokeWidth="0.22"
                     strokeDasharray="0.9 0.5"
@@ -260,7 +273,6 @@ export default function PatternCanvas({
             const tx = isSinglePieceView ? 0 : piece.layoutX;
             const ty = isSinglePieceView ? 0 : piece.layoutY;
 
-            // Compute well-proportioned label size & rotation that stays strictly inside the piece
             const shortLabel = piece.tabLabel;
             const labelAngle = piece.labelAngle ?? 0;
             const bandW =
@@ -305,21 +317,82 @@ export default function PatternCanvas({
                   />
                 )}
 
-                {/* Fold line */}
+                {/* Cut-on-fold line + standard double-bracket arrows */}
                 {piece.foldLine && (
-                  <line
-                    x1={piece.foldLine.x1}
-                    y1={piece.foldLine.y1}
-                    x2={piece.foldLine.x2}
-                    y2={piece.foldLine.y2}
-                    stroke="#E11D48"
-                    strokeWidth="0.24"
-                    strokeDasharray="1.2 0.4 0.3 0.4"
-                  />
+                  <g>
+                    <line
+                      x1={piece.foldLine.x1}
+                      y1={piece.foldLine.y1}
+                      x2={piece.foldLine.x2}
+                      y2={piece.foldLine.y2}
+                      stroke="#E11D48"
+                      strokeWidth="0.26"
+                      strokeDasharray="1.2 0.4 0.3 0.4"
+                    />
+                    {(() => {
+                      const fdx = piece.foldLine.x2 - piece.foldLine.x1;
+                      const fdy = piece.foldLine.y2 - piece.foldLine.y1;
+                      const flen = Math.hypot(fdx, fdy) || 1;
+                      const ux = fdx / flen;
+                      const uy = fdy / flen;
+                      const nx = uy;
+                      const ny = -ux;
+                      const p1x = piece.foldLine.x1 + ux * Math.min(4, flen * 0.15);
+                      const p1y = piece.foldLine.y1 + uy * Math.min(4, flen * 0.15);
+                      const p2x = piece.foldLine.x2 - ux * Math.min(4, flen * 0.15);
+                      const p2y = piece.foldLine.y2 - uy * Math.min(4, flen * 0.15);
+                      const off = 1.4;
+                      const q1x = p1x + nx * off;
+                      const q1y = p1y + ny * off;
+                      const q2x = p2x + nx * off;
+                      const q2y = p2y + ny * off;
+                      return (
+                        <g stroke="#E11D48" strokeWidth="0.2" fill="none">
+                          <path d={`M ${q1x} ${q1y} L ${p1x} ${p1y} M ${q2x} ${q2y} L ${p2x} ${p2y} M ${q1x} ${q1y} L ${q2x} ${q2y}`} />
+                          <circle cx={p1x} cy={p1y} r="0.25" fill="#E11D48" />
+                          <circle cx={p2x} cy={p2y} r="0.25" fill="#E11D48" />
+                        </g>
+                      );
+                    })()}
+                  </g>
                 )}
 
-                {/* Internal darts, lapel fold/break lines, and pocket placement boxes */}
+                {/* Internal darts, lapel folds, buttons, buttonholes, and pocket marks */}
                 {piece.internalLines?.map((line, idx) => {
+                  if (line.style === "button") {
+                    const m = line.commands[0];
+                    if (!m || m.type !== "M") return null;
+                    return (
+                      <g key={`internal-${idx}`}>
+                        <circle
+                          cx={m.x}
+                          cy={m.y}
+                          r="0.55"
+                          fill="#FFFFFF"
+                          stroke="#0F172A"
+                          strokeWidth="0.2"
+                        />
+                        <path
+                          d={`M ${m.x - 0.35} ${m.y} L ${m.x + 0.35} ${m.y} M ${m.x} ${m.y - 0.35} L ${m.x} ${m.y + 0.35}`}
+                          stroke="#0F172A"
+                          strokeWidth="0.16"
+                        />
+                      </g>
+                    );
+                  }
+                  if (line.style === "buttonhole") {
+                    const p0 = line.commands[0];
+                    const p1 = line.commands[1];
+                    if (!p0 || !p1 || p0.type !== "M" || p1.type !== "L") return null;
+                    return (
+                      <g key={`internal-${idx}`} stroke="#BE123C" strokeWidth="0.22">
+                        <line x1={p0.x} y1={p0.y} x2={p1.x} y2={p1.y} />
+                        <line x1={p0.x} y1={p0.y - 0.35} x2={p0.x} y2={p0.y + 0.35} />
+                        <line x1={p1.x} y1={p1.y - 0.35} x2={p1.x} y2={p1.y + 0.35} />
+                      </g>
+                    );
+                  }
+
                   const strokeColor =
                     line.style === "dart"
                       ? "#7C3AED"
@@ -392,37 +465,58 @@ export default function PatternCanvas({
                   </text>
                 )}
 
-                {/* Notches */}
-                {piece.notches.map((notch, idx) => (
-                  <g key={idx}>
-                    <line
-                      x1={notch.x - 0.75}
-                      y1={notch.y}
-                      x2={notch.x + 0.75}
-                      y2={notch.y}
-                      stroke="#E11D48"
-                      strokeWidth="0.26"
-                    />
-                    <circle cx={notch.x} cy={notch.y} r="0.38" fill="#E11D48" />
-                    {notch.label &&
-                      (isSinglePieceView ||
-                        notch.label.includes("Bolsillo") ||
-                        notch.label.includes("Cruce")) && (
-                        <text
-                          x={notch.x + (notch.angle === 180 ? 1.1 : -1.1)}
-                          y={notch.y + 0.35}
-                          fill="#BE123C"
-                          fontSize="1.05"
-                          fontWeight="700"
-                          textAnchor={notch.angle === 180 ? "start" : "end"}
-                        >
-                          {notch.label}
-                        </text>
-                      )}
-                  </g>
-                ))}
+                {/* Directional V-Notches (1 = delantero, 2 = espalda, 3 = centro/especial) */}
+                {piece.notches.map((notch, idx) => {
+                  const count = notch.count ?? 1;
+                  const rad = (notch.angle * Math.PI) / 180;
+                  const txVec = -Math.sin(rad);
+                  const tyVec = Math.cos(rad);
+                  const nxVec = Math.cos(rad);
+                  const nyVec = Math.sin(rad);
+                  const offsets =
+                    count === 1 ? [0] : count === 2 ? [-0.4, 0.4] : [-0.7, 0, 0.7];
 
-                {/* Large, Clear Piece Name centered inside piece (rotated along long axis on narrow/angled pieces) */}
+                  return (
+                    <g key={idx}>
+                      {offsets.map((off, nIdx) => {
+                        const cx = notch.x + txVec * off;
+                        const cy = notch.y + tyVec * off;
+                        const pLeftX = cx - txVec * 0.32 + nxVec * 0.65;
+                        const pLeftY = cy - tyVec * 0.32 + nyVec * 0.65;
+                        const pRightX = cx + txVec * 0.32 + nxVec * 0.65;
+                        const pRightY = cy + tyVec * 0.32 + nyVec * 0.65;
+                        return (
+                          <path
+                            key={nIdx}
+                            d={`M ${pLeftX} ${pLeftY} L ${cx} ${cy} L ${pRightX} ${pRightY}`}
+                            fill="none"
+                            stroke="#E11D48"
+                            strokeWidth="0.24"
+                            strokeLinejoin="round"
+                          />
+                        );
+                      })}
+                      {notch.label &&
+                        (isSinglePieceView ||
+                          notch.label.includes("Bolsillo") ||
+                          notch.label.includes("Cruce") ||
+                          notch.label.includes("cierre")) && (
+                          <text
+                            x={notch.x + (notch.angle === 180 ? 1.1 : -1.1)}
+                            y={notch.y + 0.35}
+                            fill="#BE123C"
+                            fontSize="1.05"
+                            fontWeight="700"
+                            textAnchor={notch.angle === 180 ? "start" : "end"}
+                          >
+                            {notch.label}
+                          </text>
+                        )}
+                    </g>
+                  );
+                })}
+
+                {/* Piece Title & Specs centered inside piece */}
                 <g
                   transform={`translate(${piece.labelPos.x}, ${piece.labelPos.y}) rotate(${labelAngle})`}
                 >
@@ -450,18 +544,17 @@ export default function PatternCanvas({
                     </text>
                   )}
                   {!isNarrowBand &&
-                    piece.subtitle &&
-                    piece.subtitle.startsWith("Cortar") &&
-                    piece.heightCm > 6 && (
+                    (piece.interfacingQuantity ?? 0) > 0 &&
+                    piece.heightCm > 7 && (
                       <text
                         x={0}
-                        y={finalTitleSize * (piece.heightCm > 9 ? 2.1 : 1.1)}
-                        fill="#0F766E"
+                        y={finalTitleSize * (piece.heightCm > 9 ? 2.15 : 1.15)}
+                        fill="#B45309"
                         fontSize={Math.max(0.85, subSize * 0.9)}
-                        fontWeight="700"
+                        fontWeight="800"
                         textAnchor="middle"
                       >
-                        {piece.subtitle}
+                        {`+ Entretela x${piece.interfacingQuantity}`}
                       </text>
                     )}
                 </g>
@@ -505,14 +598,24 @@ export default function PatternCanvas({
         {/* Seam Validation Badge (Top-Left of Cutting Mat) */}
         <div
           data-testid="seam-validation-badge"
-          className="absolute top-3 left-3 flex flex-wrap items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50/95 border border-emerald-300 text-xs sm:text-sm font-bold text-emerald-900 shadow-xs"
+          className={`absolute top-3 left-3 flex flex-wrap items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs sm:text-sm font-bold shadow-xs ${
+            isVerified
+              ? "bg-emerald-50/95 border-emerald-300 text-emerald-900"
+              : "bg-amber-50/95 border-amber-300 text-amber-900"
+          }`}
         >
           <span>
             {pattern.seamValidation?.badgeText ??
               "✓ Costuras verificadas: todas las piezas encajan al milímetro"}
           </span>
           {pattern.seamValidation?.checks?.[0] && (
-            <span className="hidden xl:inline text-xs font-medium text-emerald-700 border-l border-emerald-300 pl-2">
+            <span
+              className={`hidden xl:inline text-xs font-medium border-l pl-2 ${
+                isVerified
+                  ? "text-emerald-700 border-emerald-300"
+                  : "text-amber-700 border-amber-300"
+              }`}
+            >
               {pattern.seamValidation.checks[0].detail}
             </span>
           )}
@@ -531,7 +634,7 @@ export default function PatternCanvas({
           {seamAllowance > 0 && (
             <span className="flex items-center gap-1.5">
               <span className="w-4 h-0.5 border-b-2 border-dashed border-teal-600 inline-block" />
-              Coser aquí ({seamAllowance} cm)
+              Coser aquí ({seamAllowance} cm, 0 en doblez)
             </span>
           )}
         </div>
@@ -544,8 +647,16 @@ export default function PatternCanvas({
           {pattern.fabricConsumption.width140m.toFixed(2)} m (en tela de 140 cm de ancho)
         </div>
         <div className="text-slate-600">
-          Ocupa <strong className="text-slate-900">{tilingGrid.printableCount} hojas</strong> tamaño{" "}
-          {paperFormat === "letter" ? "Carta" : "A4"}
+          {paperFormat === "projector" ? (
+            <>
+              <strong className="text-slate-900">1 lámina continua</strong> para Proyector
+            </>
+          ) : (
+            <>
+              Ocupa <strong className="text-slate-900">{tilingGrid.printableCount} hojas</strong> tamaño{" "}
+              {PAPER_NAME_MAP[paperFormat]}
+            </>
+          )}
         </div>
       </div>
     </div>
