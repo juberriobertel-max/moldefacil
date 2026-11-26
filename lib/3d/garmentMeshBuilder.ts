@@ -259,8 +259,44 @@ const SISA_ESTANDAR: Omit<LimiteSisa, "yMin" | "yMax"> = {
 };
 
 /**
- * Garantiza que un punto `(x, y, z)` en la zona del torso permanezca estrictamente fuera
- * de la elipse anatómica del maniquí a su altura real `y` con al menos `holguraMinM`.
+ * Evalúa el radio máximo real de la malla posada del maniquí en `(y, theta)` si existe `envolventeCuerpo`.
+ */
+function evaluarRadioEnvolventeCuerpoM(
+  perfil: PerfilCuerpo,
+  y: number,
+  theta: number
+): number {
+  const env = perfil.envolventeCuerpo;
+  if (!env) return 0;
+  if (y < env.yMinM - 0.02 || y > env.yMaxM + 0.01) return 0;
+
+  const tY = clamp((y - env.yMinM) / Math.max(1e-5, env.yMaxM - env.yMinM), 0, 1);
+  const rowF = tY * (env.rows - 1);
+  const r0 = Math.floor(rowF);
+  const r1 = Math.min(env.rows - 1, r0 + 1);
+  const fr = rowF - r0;
+
+  let th = theta % (Math.PI * 2);
+  if (th > Math.PI) th -= Math.PI * 2;
+  if (th < -Math.PI) th += Math.PI * 2;
+  const tTh = (th + Math.PI) / (Math.PI * 2);
+  const colF = tTh * env.cols;
+  const c0 = ((Math.floor(colF) % env.cols) + env.cols) % env.cols;
+  const c1 = (c0 + 1) % env.cols;
+  const fc = colF - Math.floor(colF);
+
+  const v00 = env.radiosMaxM[r0 * env.cols + c0];
+  const v10 = env.radiosMaxM[r0 * env.cols + c1];
+  const v01 = env.radiosMaxM[r1 * env.cols + c0];
+  const v11 = env.radiosMaxM[r1 * env.cols + c1];
+  const top = v00 + (v10 - v00) * fc;
+  const bot = v01 + (v11 - v01) * fc;
+  return top + (bot - top) * fr;
+}
+
+/**
+ * Garantiza que un punto `(x, y, z)` en la zona del torso/falda permanezca estrictamente fuera
+ * tanto de la elipse anatómica como de la superficie real posada del maniquí con al menos `holguraMinM`.
  */
 function proyectarFueraDelTorso(
   x: number,
@@ -271,20 +307,47 @@ function proyectarFueraDelTorso(
 ): { x: number; y: number; z: number } {
   const yRef = clamp(y, perfil.musloYM, perfil.cuelloYM);
   const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, yRef);
-  const aMin = anillo.a + holguraMinM;
-  const bMin = anillo.b + holguraMinM;
-  const dx = x / Math.max(1e-4, aMin);
-  const dz = (z - anillo.desplazamientoZ) / Math.max(1e-4, bMin);
-  const norm = Math.hypot(dx, dz);
-  if (norm >= 1) return { x, y, z };
-  if (norm < 1e-6) {
-    return { x: 0, y, z: anillo.desplazamientoZ + bMin };
+  let px = x;
+  let pz = z;
+
+  if (y >= perfil.musloYM - 0.02) {
+    const aMin = anillo.a + holguraMinM;
+    const bMin = anillo.b + holguraMinM;
+    const dx = px / Math.max(1e-4, aMin);
+    const dz = (pz - anillo.desplazamientoZ) / Math.max(1e-4, bMin);
+    const norm = Math.hypot(dx, dz);
+    if (norm < 1) {
+      if (norm < 1e-6) {
+        px = 0;
+        pz = anillo.desplazamientoZ + bMin;
+      } else {
+        px = (dx / norm) * aMin;
+        pz = anillo.desplazamientoZ + (dz / norm) * bMin;
+      }
+    }
   }
-  return {
-    x: (dx / norm) * aMin,
-    y,
-    z: anillo.desplazamientoZ + (dz / norm) * bMin,
-  };
+
+  if (perfil.envolventeCuerpo) {
+    const dz = pz - anillo.desplazamientoZ;
+    const theta = Math.atan2(px, dz);
+    const rEnv = evaluarRadioEnvolventeCuerpoM(perfil, y, theta);
+    if (rEnv > 0.01) {
+      const rMinEnv = rEnv + Math.max(holguraMinM + 0.0018, 0.0042);
+      const rCur = Math.hypot(px, dz);
+      if (rCur < rMinEnv) {
+        if (rCur < 1e-6) {
+          px = 0;
+          pz = anillo.desplazamientoZ + rMinEnv;
+        } else {
+          const esc = rMinEnv / rCur;
+          px *= esc;
+          pz = anillo.desplazamientoZ + dz * esc;
+        }
+      }
+    }
+  }
+
+  return { x: px, y, z: pz };
 }
 
 /**
@@ -616,6 +679,21 @@ function muestrearPuntoTorsoPrenda(
   let y = anillo.y;
   let z = anillo.desplazamientoZ + bTotal * Math.cos(theta);
   let extKimono = 0;
+
+  // Garantiza que el contorno inicial rodee también la malla real posada (senos, clavículas, trapecios)
+  if (perfil.envolventeCuerpo) {
+    const rEnv = evaluarRadioEnvolventeCuerpoM(perfil, y, theta);
+    if (rEnv > 0.01) {
+      const holguraEnv = Math.max(0.0048, deltaR * 0.65) + extraOffsetRadialM;
+      const dzCur = z - anillo.desplazamientoZ;
+      const rCur = Math.hypot(x, dzCur);
+      if (rCur < rEnv + holguraEnv) {
+        const esc = (rEnv + holguraEnv) / Math.max(1e-4, rCur);
+        x *= esc;
+        z = anillo.desplazamientoZ + dzCur * esc;
+      }
+    }
+  }
 
   // Manga kimono continua: extensión lateral suave desde los anillos superiores/sisa
   if (
@@ -968,9 +1046,14 @@ function construirEscoteWrapConVistas(
         const theta = tDiagonalMin + (tDiagonalMax - tDiagonalMin) * tc;
         const a = anillo.a + baseR;
         const b = anillo.b + baseR;
-        const x = a * Math.sin(theta);
-        const z = anillo.desplazamientoZ + b * Math.cos(theta);
-        pos.push(x, y, z);
+        const seguro = proyectarFueraDelTorso(
+          a * Math.sin(theta),
+          y,
+          anillo.desplazamientoZ + b * Math.cos(theta),
+          perfil,
+          pan.normalExtra + 0.0025
+        );
+        pos.push(seguro.x, y, seguro.z);
         uvs.push((theta / (Math.PI * 2)) * (Math.PI * (a + b)), y);
       }
     }
@@ -1242,13 +1325,15 @@ function construirCuellosYBotones(
     for (let i = 0; i < numBotones; i++) {
       const tf = i / divisorBtn;
       const yBtn = THREE.MathUtils.lerp(yInicioBtn, yFinBtn, tf);
-      const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, yBtn);
-      const dr = calcularDeltaRadioM(config, yBtn, perfil, ajusteStretch);
-      dummy.position.set(
-        0,
+      const pBtn = evaluarPuntoTorsoConOffset(
+        perfil,
+        config,
         yBtn,
-        anillo.desplazamientoZ + anillo.b + dr + (esCamisero ? 0.0095 : 0.0045)
+        0,
+        ajusteStretch,
+        esCamisero ? 0.0095 : 0.0045
       );
+      dummy.position.set(pBtn.x, pBtn.y, pBtn.z);
       dummy.updateMatrix();
       instBotones.setMatrixAt(i, dummy.matrix);
     }
@@ -1678,8 +1763,21 @@ function construirFaldaYBolero(
 
     for (let s = 0; s <= segs; s++) {
       const theta = ((s / segs) - 0.5) * Math.PI * 2;
-      const px = aBase * Math.sin(theta);
-      const pz = zCentro + bBase * Math.cos(theta);
+      const pxRaw = aBase * Math.sin(theta);
+      const pzRaw = zCentro + bBase * Math.cos(theta);
+      const rEnv = evaluarRadioEnvolventeCuerpoM(perfil, y, theta);
+      let px = pxRaw;
+      let pz = pzRaw;
+      if (rEnv > 0.01) {
+        const dz = pz - zCentro;
+        const rCur = Math.hypot(px, dz);
+        const rMin = rEnv + Math.max(0.006, drBase * 0.5);
+        if (rCur < rMin && rCur > 1e-5) {
+          const esc = rMin / rCur;
+          px *= esc;
+          pz = zCentro + dz * esc;
+        }
+      }
 
       pos.push(px, y, pz);
       uvs.push(
@@ -1690,7 +1788,7 @@ function construirFaldaYBolero(
     }
   }
 
-  // Real multi-harmonic cloth godets + XPBD gravity drape + leg/torso collision
+  // Real multi-harmonic cloth godets + XPBD gravity drape + leg/torso/GLB envelope collision
   const { piernaIzq, piernaDer } = perfil.trayectorias;
   applySkirtClothDrape({
     positions: pos,
@@ -1700,29 +1798,35 @@ function construirFaldaYBolero(
     config,
     tela,
     projectSkirtSafe: (x, y, z) => {
-      if (y >= perfil.caderaYM) {
-        return proyectarFueraDelTorso(x, y, z, perfil, 0.003);
+      let cur = { x, y, z };
+      if (y >= (perfil.envolventeCuerpo?.yMinM ?? perfil.caderaYM)) {
+        cur = proyectarFueraDelTorso(cur.x, cur.y, cur.z, perfil, 0.0045);
       }
-      const p1 = proyectarFueraDeSegmento(
-        x,
-        y,
-        z,
-        piernaIzq.cadera,
-        piernaIzq.tobillo,
-        piernaIzq.radioMusloM,
-        piernaIzq.radioTobilloM,
-        0.008
-      );
-      return proyectarFueraDeSegmento(
-        p1.x,
-        p1.y,
-        p1.z,
-        piernaDer.cadera,
-        piernaDer.tobillo,
-        piernaDer.radioMusloM,
-        piernaDer.radioTobilloM,
-        0.008
-      );
+      if (cur.y < perfil.caderaYM) {
+        for (const pierna of [piernaIzq, piernaDer]) {
+          cur = proyectarFueraDeSegmento(
+            cur.x,
+            cur.y,
+            cur.z,
+            pierna.cadera,
+            pierna.rodilla,
+            pierna.radioMusloM,
+            pierna.radioRodillaM,
+            0.0085
+          );
+          cur = proyectarFueraDeSegmento(
+            cur.x,
+            cur.y,
+            cur.z,
+            pierna.rodilla,
+            pierna.tobillo,
+            pierna.radioRodillaM,
+            pierna.radioTobilloM,
+            0.0085
+          );
+        }
+      }
+      return cur;
     },
   });
 
@@ -1853,11 +1957,14 @@ function construirPretina(
     const circ = Math.PI * (anillo.a + anillo.b + 2 * dr);
     for (let s = 0; s <= segs; s++) {
       const theta = ((s / segs) - 0.5) * Math.PI * 2;
-      pos.push(
+      const p = proyectarFueraDelTorso(
         (anillo.a + dr) * Math.sin(theta),
         y,
-        anillo.desplazamientoZ + (anillo.b + dr) * Math.cos(theta)
+        anillo.desplazamientoZ + (anillo.b + dr) * Math.cos(theta),
+        perfil,
+        0.0045
       );
+      pos.push(p.x, y, p.z);
       uvs.push((theta / (Math.PI * 2)) * circ, y);
     }
   }
@@ -2076,11 +2183,14 @@ function construirPantalon(
 
     for (let s = 0; s <= segsYugo; s++) {
       const theta = ((s / segsYugo) - 0.5) * Math.PI * 2;
-      pos.push(
+      const p = proyectarFueraDelTorso(
         a * Math.sin(theta),
         y,
-        anillo.desplazamientoZ + b * Math.cos(theta)
+        anillo.desplazamientoZ + b * Math.cos(theta),
+        perfil,
+        0.004
       );
+      pos.push(p.x, y, p.z);
       uvs.push((theta / (Math.PI * 2)) * circ, y);
     }
   }
@@ -2294,11 +2404,14 @@ function construirCinturonConLazo(
     );
     for (let s = 0; s <= segs; s++) {
       const theta = ((s / segs) - 0.5) * Math.PI * 2;
-      pos.push(
+      const p = proyectarFueraDelTorso(
         aBelt * Math.sin(theta),
         y,
-        cintura.desplazamientoZ + bBelt * Math.cos(theta)
+        cintura.desplazamientoZ + bBelt * Math.cos(theta),
+        perfil,
+        0.006
       );
+      pos.push(p.x, y, p.z);
       uvs.push((theta / (Math.PI * 2)) * circ, y);
     }
   }
@@ -2325,7 +2438,9 @@ function construirCinturonConLazo(
   objetos.push(beltMesh);
 
   // Ancla frontal del lazo 3D
-  const zFrente = cintura.desplazamientoZ + bBelt + 0.008;
+  const rEnvFrenteCint = evaluarRadioEnvolventeCuerpoM(perfil, cintura.y, 0);
+  const bFrenteBelt = Math.max(bBelt, rEnvFrenteCint > 0.01 ? rEnvFrenteCint + 0.006 : 0);
+  const zFrente = cintura.desplazamientoZ + bFrenteBelt + 0.008;
   const yCint = cintura.y;
 
   // Nudo central
@@ -3061,10 +3176,15 @@ function construirBolsillos3D(
         const dr = calcularDeltaRadioM(config, y, perfil, ajusteStretch) + 0.007;
         for (let c = 0; c < cols; c++) {
           const th = THREE.MathUtils.lerp(thMin, thMax, c / (cols - 1));
-          const x = (an.a + dr) * Math.sin(th);
-          const z = an.desplazamientoZ + (an.b + dr) * Math.cos(th);
-          pos.push(x, y, z);
-          uvs.push(x, y);
+          const p = proyectarFueraDelTorso(
+            (an.a + dr) * Math.sin(th),
+            y,
+            an.desplazamientoZ + (an.b + dr) * Math.cos(th),
+            perfil,
+            0.007
+          );
+          pos.push(p.x, y, p.z);
+          uvs.push(p.x, y);
         }
       }
       for (let r = 0; r < rows - 1; r++) {
@@ -3117,13 +3237,15 @@ function construirBolsillos3D(
       );
 
       // Botón centrado en la tapa
-      const anBtn = evaluarPerfilEnY(perfil.anillosInterpolados, yTop - cmAMetros(1.2));
-      const drBtn = calcularDeltaRadioM(config, yTop, perfil, ajusteStretch) + 0.0135;
-      dummy.position.set(
-        (anBtn.a + drBtn) * Math.sin(thCentro),
+      const pBtnBol = evaluarPuntoTorsoConOffset(
+        perfil,
+        config,
         yTop - cmAMetros(1.4),
-        anBtn.desplazamientoZ + (anBtn.b + drBtn) * Math.cos(thCentro)
+        thCentro,
+        ajusteStretch,
+        0.0135
       );
+      dummy.position.set(pBtnBol.x, pBtnBol.y, pBtnBol.z);
       dummy.rotation.set(0, thCentro, 0);
       dummy.updateMatrix();
       instBtnBolsillo.setMatrixAt(idxBtn, dummy.matrix);
@@ -3262,10 +3384,15 @@ function construirPecheraYTirantesOverall(
       for (let c = 0; c < cols; c++) {
         const tc = c / (cols - 1);
         const th = ladoSpec.thCentro + THREE.MathUtils.lerp(-spanTh, spanTh, tc);
-        const x = (an.a + dr) * Math.sin(th);
-        const z = an.desplazamientoZ + (an.b + dr) * Math.cos(th);
-        pos.push(x, y, z);
-        uvs.push(x, y);
+        const p = proyectarFueraDelTorso(
+          (an.a + dr) * Math.sin(th),
+          y,
+          an.desplazamientoZ + (an.b + dr) * Math.cos(th),
+          perfil,
+          0.0045
+        );
+        pos.push(p.x, y, p.z);
+        uvs.push(p.x, y);
       }
     }
     for (let r = 0; r < rows - 1; r++) {
@@ -3418,10 +3545,15 @@ function construirDelantal3D(
 
     for (let s = 0; s <= segs; s++) {
       const th = THREE.MathUtils.lerp(-maxTheta, maxTheta, s / segs);
-      const px = (an.a + dr) * Math.sin(th);
-      const pz = an.desplazamientoZ + (an.b + dr) * Math.cos(th);
-      pos.push(px, y, pz);
-      uvs.push(px, y);
+      const p = proyectarFueraDelTorso(
+        (an.a + dr) * Math.sin(th),
+        y,
+        an.desplazamientoZ + (an.b + dr) * Math.cos(th),
+        perfil,
+        0.0055
+      );
+      pos.push(p.x, y, p.z);
+      uvs.push(p.x, y);
       pesos[r * (segs + 1) + s] = y < yCint ? Math.pow((yCint - y) / Math.max(0.1, yCint - yBotApron), 1.3) * 0.6 : 0;
     }
   }
