@@ -10,7 +10,7 @@ export interface ConfiguracionFisicaTela {
   clearcoatRoughness: number;
   sheen: number;
   sheenRoughness: number;
-  bumpScale: number;
+  normalScale: number;
   amplitudCaidaM: number;
   frecuenciaOnda: number;
   ajusteStretchM: number;
@@ -19,53 +19,53 @@ export interface ConfiguracionFisicaTela {
 
 export const PROPIEDADES_FISICAS_TELA: Record<TipoTela, ConfiguracionFisicaTela> = {
   seda: {
-    roughness: 0.22,
+    roughness: 0.28,
     metalness: 0.04,
-    clearcoat: 0.35,
+    clearcoat: 0.32,
     clearcoatRoughness: 0.24,
-    sheen: 0.18,
-    sheenRoughness: 0.35,
-    bumpScale: 0.0003,
+    sheen: 0.45,
+    sheenRoughness: 0.34,
+    normalScale: 0.55,
     amplitudCaidaM: 0.0085,
     frecuenciaOnda: 2.35,
     ajusteStretchM: 0,
     etiquetaCorta: "Seda / Satén",
   },
   crepe: {
-    roughness: 0.55,
+    roughness: 0.62,
     metalness: 0.0,
     clearcoat: 0.0,
     clearcoatRoughness: 0.55,
-    sheen: 0.6,
-    sheenRoughness: 0.58,
-    bumpScale: 0.0022,
+    sheen: 0.62,
+    sheenRoughness: 0.56,
+    normalScale: 0.85,
     amplitudCaidaM: 0.005,
     frecuenciaOnda: 1.5,
     ajusteStretchM: 0,
     etiquetaCorta: "Crepé / Viscosa",
   },
   lino: {
-    roughness: 0.85,
+    roughness: 0.88,
     metalness: 0.0,
     clearcoat: 0.0,
     clearcoatRoughness: 0.85,
-    sheen: 0.16,
+    sheen: 0.18,
     sheenRoughness: 0.82,
-    bumpScale: 0.0046,
-    amplitudCaidaM: 0.0016,
+    normalScale: 1.15,
+    amplitudCaidaM: 0.0018,
     frecuenciaOnda: 1.0,
     ajusteStretchM: 0,
     etiquetaCorta: "Lino / Gabardina",
   },
   licra: {
-    roughness: 0.4,
+    roughness: 0.44,
     metalness: 0.02,
-    clearcoat: 0.08,
+    clearcoat: 0.06,
     clearcoatRoughness: 0.42,
-    sheen: 0.36,
+    sheen: 0.40,
     sheenRoughness: 0.48,
-    bumpScale: 0.0018,
-    amplitudCaidaM: 0.0024,
+    normalScale: 0.85,
+    amplitudCaidaM: 0.0022,
     frecuenciaOnda: 1.75,
     ajusteStretchM: -0.004,
     etiquetaCorta: "Licra / Punto",
@@ -101,7 +101,7 @@ export interface SombraContactoPedestal {
 }
 
 const TAM_TEXTURA_ESTAMPADO = 512;
-const TAM_TEXTURA_TRAMA = 256;
+const TAM_TEXTURA_PBR = 512;
 
 function normalizarHex(colorCss: string): string {
   try {
@@ -140,9 +140,6 @@ function obtenerColorContraste(hexBase: string): {
   };
 }
 
-/**
- * Fallback liviano cuando se ejecuta en entornos sin DOM (pruebas unitarias en Node).
- */
 function crearTexturaSolidaFallback(hex: string, esSrgb: boolean): THREE.DataTexture {
   const c = new THREE.Color(hex);
   const data = new Uint8Array([
@@ -159,9 +156,6 @@ function crearTexturaSolidaFallback(hex: string, esSrgb: boolean): THREE.DataTex
   return tex;
 }
 
-/**
- * Traza la microtextura sutil del tejido sobre un lienzo de 512 px con periodo exacto (sin costuras).
- */
 function dibujarMicroTexturaTela512(
   ctx: CanvasRenderingContext2D,
   tela: TipoTela
@@ -169,44 +163,42 @@ function dibujarMicroTexturaTela512(
   const n = TAM_TEXTURA_ESTAMPADO;
   ctx.save();
   if (tela === "seda") {
-    // Sutil brillo direccional de satén periódico (divisor exacto de 512)
     for (let y = 0; y < n; y += 2) {
       const lum = Math.sin((y / n) * Math.PI * 16) * 0.5 + 0.5;
       ctx.fillStyle = `rgba(255, 255, 255, ${(0.015 + lum * 0.025).toFixed(4)})`;
       ctx.fillRect(0, y, n, 2);
     }
   } else if (tela === "crepe") {
-    // Grano crepé suave mediante cuadrícula sinusoidal periódica
     for (let y = 0; y < n; y += 4) {
       for (let x = 0; x < n; x += 4) {
-        const hash =
-          Math.sin((x / n) * Math.PI * 64 + Math.cos((y / n) * Math.PI * 64) * 2.1);
+        const hash = Math.sin(
+          (x / n) * Math.PI * 64 + Math.cos((y / n) * Math.PI * 64) * 2.1
+        );
         ctx.fillStyle =
-          hash > 0 ? "rgba(255, 255, 255, 0.025)" : "rgba(0, 0, 0, 0.025)";
+          hash > 0 ? "rgba(255, 255, 255, 0.028)" : "rgba(0, 0, 0, 0.028)";
         ctx.fillRect(x, y, 3, 3);
       }
     }
   } else if (tela === "lino") {
-    // Hilos ortogonales perceptibles de lino / drill (paso 8 px divisor exacto de 512)
     for (let i = 0; i < n; i += 8) {
-      ctx.fillStyle = i % 16 === 0 ? "rgba(0, 0, 0, 0.045)" : "rgba(255, 255, 255, 0.04)";
+      const slub = Math.sin(i * 0.37) * 0.015;
+      ctx.fillStyle =
+        i % 16 === 0
+          ? `rgba(0, 0, 0, ${(0.05 + slub).toFixed(4)})`
+          : `rgba(255, 255, 255, ${(0.045 + slub).toFixed(4)})`;
       ctx.fillRect(i, 0, 2, n);
       ctx.fillRect(0, i, n, 2);
     }
   } else {
-    // Licra / Punto fino en acanalado vertical continuo (paso 8 px)
-    for (let x = 0; x < n; x += 8) {
-      ctx.fillStyle = x % 16 === 0 ? "rgba(255, 255, 255, 0.035)" : "rgba(0, 0, 0, 0.035)";
+    for (let x = 0; x < n; x += 6) {
+      ctx.fillStyle =
+        x % 12 === 0 ? "rgba(255, 255, 255, 0.036)" : "rgba(0, 0, 0, 0.036)";
       ctx.fillRect(x, 0, 2, n);
     }
   }
   ctx.restore();
 }
 
-/**
- * Genera mapa difuso procedural 512x512 completamente repetible sin costuras
- * para `(estampado, color, tela)` con escala física de `8 cm` por repetición.
- */
 function crearTexturaEstampado512(
   estampado: TipoEstampado,
   colorHex: string,
@@ -231,9 +223,8 @@ function crearTexturaEstampado512(
       obtenerColorContraste(colorHex);
 
     if (estampado === "vichy") {
-      // Cuadros Vichy clásicos: 4 bloques de 128 px (2 cm reales) sobre fondo luminoso
-      const paso = size / 4; // 128 px exactos -> seamless 100%
-      const banda = paso / 2; // 64 px
+      const paso = size / 4;
+      const banda = paso / 2;
 
       ctx.fillStyle = vichyFondoHex;
       ctx.fillRect(0, 0, size, size);
@@ -250,7 +241,6 @@ function crearTexturaEstampado512(
         ctx.fillRect(0, j * paso, size, banda);
       }
 
-      // Refuerzo sutil en intersecciones para dar riqueza textil de hilo teñido
       ctx.fillStyle = fillCruce;
       for (let i = 0; i < 4; i++) {
         for (let j = 0; j < 4; j++) {
@@ -262,9 +252,8 @@ function crearTexturaEstampado512(
       ctx.fillRect(0, 0, size, size);
 
       if (estampado === "lunares") {
-        // Lunares escalonados 4x4 (paso 128 px, radio ~18 px -> ~5.6 mm reales) con wrap toroidal
-        const step = size / 4; // 128 px
-        const half = step / 2; // 64 px
+        const step = size / 4;
+        const half = step / 2;
         const radio = 18;
         ctx.fillStyle = esClaro ? "rgba(51, 41, 36, 0.85)" : "rgba(246, 240, 228, 0.90)";
 
@@ -294,8 +283,7 @@ function crearTexturaEstampado512(
           }
         }
       } else if (estampado === "rayas") {
-        // Rayas sastre verticales: 8 repeticiones exactas por cada 512 px (~1 cm de paso)
-        const period = size / 8; // 64 px
+        const period = size / 8;
         ctx.fillStyle = esClaro ? "rgba(51, 41, 36, 0.65)" : contrasteHex;
         ctx.globalAlpha = esClaro ? 0.62 : 0.78;
         for (let x = 0; x < size; x += period) {
@@ -320,86 +308,151 @@ function crearTexturaEstampado512(
 }
 
 /**
- * Crea mapa de relieve (`bumpMap` 256 px) sin costuras para trama de lino, crepé o punto.
+ * Generates seamless 512x512 tangent-space `normalMap` and `roughnessMap` from true
+ * textile weave heightfields (satin twill, crepe high-twist, slubbed linen, or V-knit jersey).
  */
-function crearBumpTexturaTela256(
+function crearMapasPbrTela512(
   tela: TipoTela,
   anisotropyMax: number
-): THREE.Texture | null {
-  if (tela === "seda") {
-    return null;
-  }
-
-  const repeatVal = tela === "lino" ? 1 / 0.036 : tela === "licra" ? 1 / 0.024 : 1 / 0.045;
+): { normalMap: THREE.Texture; roughnessMap: THREE.Texture } {
+  const repeatVal =
+    tela === "lino"
+      ? 1 / 0.036
+      : tela === "licra"
+        ? 1 / 0.024
+        : tela === "seda"
+          ? 1 / 0.052
+          : 1 / 0.042;
 
   if (typeof document === "undefined") {
-    const fb = crearTexturaSolidaFallback("#808080", false);
-    fb.repeat.set(repeatVal, repeatVal);
-    fb.anisotropy = Math.min(4, anisotropyMax);
-    return fb;
+    const nFb = crearTexturaSolidaFallback("#8080FF", false);
+    nFb.repeat.set(repeatVal, repeatVal);
+    nFb.anisotropy = Math.min(4, anisotropyMax);
+    const rFb = crearTexturaSolidaFallback("#D0D0D0", false);
+    rFb.repeat.set(repeatVal, repeatVal);
+    rFb.anisotropy = Math.min(4, anisotropyMax);
+    return { normalMap: nFb, roughnessMap: rFb };
   }
 
-  const size = TAM_TEXTURA_TRAMA;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
+  const size = TAM_TEXTURA_PBR;
+  const height = new Float32Array(size * size);
 
-  if (ctx) {
-    ctx.fillStyle = "#808080";
-    ctx.fillRect(0, 0, size, size);
+  const tau = Math.PI * 2;
+  for (let y = 0; y < size; y++) {
+    const v = y / size;
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      let h = 0;
 
-    if (tela === "lino") {
-      // Trama cruzada equilibrada urdimbre + trama (paso 8 px divisor exacto de 256)
-      for (let y = 0; y < size; y += 8) {
-        for (let x = 0; x < size; x += 8) {
-          const paridad = ((x >> 3) + (y >> 3)) % 2 === 0;
-          ctx.fillStyle = paridad ? "#B8B8B8" : "#585858";
-          ctx.fillRect(x, y, 6, 4);
-          ctx.fillStyle = paridad ? "#626262" : "#AFAFAF";
-          ctx.fillRect(x + 2, y + 4, 4, 4);
-        }
+      if (tela === "lino") {
+        // Slubbed warp & weft plain linen weave
+        const cellX = (x >> 3) & 1;
+        const cellY = (y >> 3) & 1;
+        const fx = (x % 8) / 8;
+        const fy = (y % 8) / 8;
+        const warpThread = Math.sin(fx * Math.PI);
+        const weftThread = Math.sin(fy * Math.PI);
+        const parity = (cellX + cellY) % 2 === 0;
+        const slub =
+          0.16 * Math.sin(u * tau * 3 + Math.cos(v * tau * 5)) +
+          0.12 * Math.sin(v * tau * 4 - Math.sin(u * tau * 7));
+        h = parity
+          ? warpThread * 0.72 + weftThread * 0.25 + slub
+          : weftThread * 0.72 + warpThread * 0.25 + slub;
+      } else if (tela === "licra") {
+        // Jersey fine V-stitch rib knit
+        const rib = Math.sin(u * tau * 64);
+        const chevron = Math.sin(v * tau * 48 + Math.abs(((x % 8) - 4) / 4) * 1.4);
+        h = rib * 0.55 + chevron * 0.45;
+      } else if (tela === "seda") {
+        // Diagonal satin twill + silky subtle directional sheen wave
+        const diag = Math.sin((u * 48 + v * 16) * tau);
+        const softWave = 0.35 * Math.sin(v * tau * 8 + Math.sin(u * tau * 6));
+        h = diag * 0.28 + softWave * 0.35;
+      } else {
+        // High-twist granular crepe weave
+        const g1 = Math.sin(u * tau * 48 + Math.cos(v * tau * 48) * 1.8);
+        const g2 = Math.cos(v * tau * 40 - Math.sin(u * tau * 32) * 1.6);
+        h = (g1 + g2) * 0.45;
       }
-    } else if (tela === "licra") {
-      // Punto fino Jersey: espigas verticales finas cada 4 px (64 repeticiones exactas)
-      for (let x = 0; x < size; x += 4) {
-        const esValle = (x >> 2) % 2 === 0;
-        ctx.fillStyle = esValle ? "#606060" : "#A2A2A2";
-        ctx.fillRect(x, 0, 2, size);
-      }
-      for (let y = 0; y < size; y += 8) {
-        ctx.fillStyle = "rgba(180, 180, 180, 0.35)";
-        ctx.fillRect(0, y, size, 2);
-      }
-    } else {
-      // Crepé: granulado multidireccional periódico sin costuras
-      for (let y = 0; y < size; y += 4) {
-        for (let x = 0; x < size; x += 4) {
-          const v =
-            Math.sin((x / size) * Math.PI * 32) *
-            Math.cos((y / size) * Math.PI * 32 + Math.sin((x / size) * Math.PI * 16));
-          const tono = Math.round(128 + v * 36);
-          ctx.fillStyle = `rgb(${tono}, ${tono}, ${tono})`;
-          ctx.fillRect(x, y, 4, 4);
-        }
-      }
+      height[y * size + x] = h;
     }
   }
 
-  const bumpTex = new THREE.CanvasTexture(canvas);
-  bumpTex.colorSpace = THREE.NoColorSpace;
-  bumpTex.wrapS = THREE.RepeatWrapping;
-  bumpTex.wrapT = THREE.RepeatWrapping;
-  bumpTex.repeat.set(repeatVal, repeatVal);
-  bumpTex.anisotropy = Math.min(4, Math.max(1, anisotropyMax));
-  bumpTex.needsUpdate = true;
-  return bumpTex;
+  const strength =
+    tela === "lino" ? 3.2 : tela === "crepe" ? 2.1 : tela === "licra" ? 2.2 : 1.05;
+
+  const normCanvas = document.createElement("canvas");
+  normCanvas.width = size;
+  normCanvas.height = size;
+  const normCtx = normCanvas.getContext("2d");
+
+  const roughCanvas = document.createElement("canvas");
+  roughCanvas.width = size;
+  roughCanvas.height = size;
+  const roughCtx = roughCanvas.getContext("2d");
+
+  if (normCtx && roughCtx) {
+    const normImg = normCtx.createImageData(size, size);
+    const roughImg = roughCtx.createImageData(size, size);
+
+    for (let y = 0; y < size; y++) {
+      const ym = (y - 1 + size) & (size - 1);
+      const yp = (y + 1) & (size - 1);
+      for (let x = 0; x < size; x++) {
+        const xm = (x - 1 + size) & (size - 1);
+        const xp = (x + 1) & (size - 1);
+
+        const hL = height[y * size + xm];
+        const hR = height[y * size + xp];
+        const hU = height[ym * size + x];
+        const hD = height[yp * size + x];
+
+        const dX = (hL - hR) * strength;
+        const dY = (hU - hD) * strength;
+        const dZ = 1.0;
+        const inv = 1 / Math.hypot(dX, dY, dZ);
+
+        const idx4 = (y * size + x) * 4;
+        normImg.data[idx4] = Math.round((dX * inv * 0.5 + 0.5) * 255);
+        normImg.data[idx4 + 1] = Math.round((dY * inv * 0.5 + 0.5) * 255);
+        normImg.data[idx4 + 2] = Math.round((dZ * inv * 0.5 + 0.5) * 255);
+        normImg.data[idx4 + 3] = 255;
+
+        // Roughness value modulates threads (crests slightly smoother than yarn valleys)
+        const valH = height[y * size + x];
+        const roughScalar = Math.round(
+          THREE.MathUtils.clamp(225 - valH * 42, 165, 255)
+        );
+        roughImg.data[idx4] = roughScalar;
+        roughImg.data[idx4 + 1] = roughScalar;
+        roughImg.data[idx4 + 2] = roughScalar;
+        roughImg.data[idx4 + 3] = 255;
+      }
+    }
+    normCtx.putImageData(normImg, 0, 0);
+    roughCtx.putImageData(roughImg, 0, 0);
+  }
+
+  const normalMap = new THREE.CanvasTexture(normCanvas);
+  normalMap.colorSpace = THREE.NoColorSpace;
+  normalMap.wrapS = THREE.RepeatWrapping;
+  normalMap.wrapT = THREE.RepeatWrapping;
+  normalMap.repeat.set(repeatVal, repeatVal);
+  normalMap.anisotropy = Math.min(4, Math.max(1, anisotropyMax));
+  normalMap.needsUpdate = true;
+
+  const roughnessMap = new THREE.CanvasTexture(roughCanvas);
+  roughnessMap.colorSpace = THREE.NoColorSpace;
+  roughnessMap.wrapS = THREE.RepeatWrapping;
+  roughnessMap.wrapT = THREE.RepeatWrapping;
+  roughnessMap.repeat.set(repeatVal, repeatVal);
+  roughnessMap.anisotropy = Math.min(4, Math.max(1, anisotropyMax));
+  roughnessMap.needsUpdate = true;
+
+  return { normalMap, roughnessMap };
 }
 
-/**
- * Configura el WebGLRenderer según los estándares de colorimetría sRGB, tone mapping ACES
- * y límite de densidad de píxeles para rendimiento fluido en móvil y escritorio.
- */
 export function configurarRendererEscena3D(renderer: THREE.WebGLRenderer): void {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -410,10 +463,6 @@ export function configurarRendererEscena3D(renderer: THREE.WebGLRenderer): void 
   renderer.setPixelRatio(Math.min(dpr, 2));
 }
 
-/**
- * Configura iluminación de 3 puntos cálida + entorno procedural `RoomEnvironment` vía `PMREMGenerator`.
- * Libera el `PMREMGenerator` y la escena auxiliar inmediatamente tras hornear el entorno.
- */
 export function configurarIluminacionYEntorno3D(
   scene: THREE.Scene,
   renderer: THREE.WebGLRenderer
@@ -424,7 +473,6 @@ export function configurarIluminacionYEntorno3D(
   const envScene = new RoomEnvironment();
   const envRenderTarget = pmremGenerator.fromScene(envScene, 0.04);
 
-  // Limpieza inmediata de RoomEnvironment y PMREMGenerator tras generar el cubo PMREM
   envScene.traverse((obj) => {
     const mesh = obj as THREE.Object3D & {
       geometry?: THREE.BufferGeometry;
@@ -440,38 +488,35 @@ export function configurarIluminacionYEntorno3D(
   pmremGenerator.dispose();
 
   scene.environment = envRenderTarget.texture;
-  scene.environmentIntensity = 0.5;
+  scene.environmentIntensity = 0.52;
 
   const luces = new THREE.Group();
   luces.name = "estudio-iluminacion-3d";
 
-  // Relleno ambiental suave cálido-crema arriba y sombra neutra abajo
-  const luzHemi = new THREE.HemisphereLight("#FAF6F0", "#CBBFB0", 0.65);
+  const luzHemi = new THREE.HemisphereLight("#FAF6F0", "#C4B7A8", 0.62);
   luces.add(luzHemi);
 
-  // Luz clave cálida principal (delantero derecho superior) con sombras suaves PCF
-  const luzClave = new THREE.DirectionalLight("#FFF4E6", 2.15);
-  luzClave.position.set(2.2, 3.1, 2.7);
+  // Raking studio key light with 2048x2048 soft PCF shadows to sculpt cloth folds
+  const luzClave = new THREE.DirectionalLight("#FFF3E4", 2.25);
+  luzClave.position.set(2.45, 2.75, 2.15);
   luzClave.castShadow = true;
-  luzClave.shadow.mapSize.set(1024, 1024);
-  luzClave.shadow.bias = -0.0006;
-  luzClave.shadow.normalBias = 0.012;
-  luzClave.shadow.camera.left = -0.9;
-  luzClave.shadow.camera.right = 0.9;
-  luzClave.shadow.camera.top = 1.9;
-  luzClave.shadow.camera.bottom = -0.1;
+  luzClave.shadow.mapSize.set(2048, 2048);
+  luzClave.shadow.bias = -0.0004;
+  luzClave.shadow.normalBias = 0.008;
+  luzClave.shadow.camera.left = -0.85;
+  luzClave.shadow.camera.right = 0.85;
+  luzClave.shadow.camera.top = 1.85;
+  luzClave.shadow.camera.bottom = -0.05;
   luzClave.shadow.camera.near = 0.5;
   luzClave.shadow.camera.far = 6.5;
   luces.add(luzClave);
 
-  // Luz de relleno suave izquierda
-  const luzRelleno = new THREE.DirectionalLight("#EEF3FB", 0.72);
-  luzRelleno.position.set(-2.3, 2.0, 1.8);
+  const luzRelleno = new THREE.DirectionalLight("#ECF2FC", 0.68);
+  luzRelleno.position.set(-2.3, 1.9, 1.7);
   luces.add(luzRelleno);
 
-  // Contraluz trasera para recortar silueta y destacar caída
-  const luzContraluz = new THREE.DirectionalLight("#FFE7D1", 1.05);
-  luzContraluz.position.set(-0.5, 2.5, -2.8);
+  const luzContraluz = new THREE.DirectionalLight("#FFE6CE", 1.15);
+  luzContraluz.position.set(-0.6, 2.4, -2.7);
   luces.add(luzContraluz);
 
   scene.add(luces);
@@ -487,9 +532,6 @@ export function configurarIluminacionYEntorno3D(
   };
 }
 
-/**
- * Crea un plano de sombra de contacto suave con `CanvasTexture` radial bajo el pedestal (sin shadow maps).
- */
 export function crearSombraContactoPedestal(): SombraContactoPedestal {
   let tex: THREE.Texture;
 
@@ -545,10 +587,6 @@ export function crearSombraContactoPedestal(): SombraContactoPedestal {
   };
 }
 
-/**
- * Aplica movimiento orgánico sutil de caída sobre los vértices con peso (`userData.datosCaida`),
- * respetando `prefers-reduced-motion` y garantizando desplazamiento radial positivo (sin perforar maniquí).
- */
 export function animarCaidaTelas(
   grupoPrenda: THREE.Object3D,
   tela: TipoTela,
@@ -593,7 +631,6 @@ export function animarCaidaTelas(
       const bz = posicionesBase[idx3 + 2];
 
       const rXZ = Math.max(1e-4, Math.hypot(bx, bz));
-      // Onda estrictamente positiva [0, 1] para evitar perforar el maniquí en vuelos suaves
       const onda =
         0.5 +
         0.5 *
@@ -609,6 +646,7 @@ export function animarCaidaTelas(
     }
 
     posAttr.needsUpdate = true;
+    obj.geometry.computeVertexNormals();
     obj.userData.caidaActiva = true;
     huboCambio = true;
   });
@@ -616,22 +654,21 @@ export function animarCaidaTelas(
   return huboCambio;
 }
 
-/**
- * Repositorio con caché de texturas por `(estampado, color, tela)` + trama tejida (`bumpMap`).
- * Al cambiar color, tela o estampado actualiza las instancias compartidas de `MeshPhysicalMaterial`
- * sin reconstruir geometrías de malla.
- */
 export function crearRepositorioMateriales(
   renderer?: THREE.WebGLRenderer
 ): RepositorioMaterialesTela {
   const maxAniso = renderer?.capabilities?.getMaxAnisotropy?.() ?? 4;
 
   const cacheAlbedo = new Map<string, THREE.Texture>();
-  const cacheBump = new Map<TipoTela, THREE.Texture | null>();
+  const cachePbr = new Map<
+    TipoTela,
+    { normalMap: THREE.Texture; roughnessMap: THREE.Texture }
+  >();
   const todasTexturas = new Set<THREE.Texture>();
 
   const materialPrincipal = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color("#FFFFFF"),
+    vertexColors: true,
     roughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].roughness,
     sheen: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheen,
     sheenRoughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheenRoughness,
@@ -639,9 +676,9 @@ export function crearRepositorioMateriales(
   });
   materialPrincipal.name = "material-tela-principal";
 
-  // Material secundario para falda/pantalón en conjuntos de 2 piezas
   const materialSecundario = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color("#FFFFFF"),
+    vertexColors: true,
     roughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].roughness,
     sheen: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheen,
     sheenRoughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheenRoughness,
@@ -649,16 +686,15 @@ export function crearRepositorioMateriales(
   });
   materialSecundario.name = "material-tela-secundario";
 
-  // Material sutilmente contrastado para vista de 4 cm, pretina y lazo sin reconstruir malla
   const materialVista = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color("#F4F0EA"),
+    vertexColors: true,
     roughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].roughness,
     sheen: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheen,
     side: THREE.DoubleSide,
   });
   materialVista.name = "material-tela-vista";
 
-  // Material para modo "Mapa de Calce" con vertexColors térmicos de holgura
   const materialMapaCalce = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color("#FFFFFF"),
     vertexColors: true,
@@ -669,9 +705,9 @@ export function crearRepositorioMateriales(
   });
   materialMapaCalce.name = "material-mapa-calce";
 
-  // Material con resaltado cálido para destacar la pieza seleccionada 2D <-> 3D
   const materialResaltado = new THREE.MeshPhysicalMaterial({
     color: new THREE.Color("#FFFFFF"),
+    vertexColors: true,
     roughness: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].roughness,
     sheen: PROPIEDADES_FISICAS_TELA[APARIENCIA_POR_DEFECTO.tela].sheen,
     emissive: new THREE.Color("#C85A32"),
@@ -705,12 +741,14 @@ export function crearRepositorioMateriales(
     return nueva;
   };
 
-  const obtenerBump = (tela: TipoTela): THREE.Texture | null => {
-    if (cacheBump.has(tela)) return cacheBump.get(tela) ?? null;
-    const nueva = crearBumpTexturaTela256(tela, maxAniso);
-    cacheBump.set(tela, nueva);
-    if (nueva) todasTexturas.add(nueva);
-    return nueva;
+  const obtenerPbr = (tela: TipoTela) => {
+    const existing = cachePbr.get(tela);
+    if (existing) return existing;
+    const mapas = crearMapasPbrTela512(tela, maxAniso);
+    cachePbr.set(tela, mapas);
+    todasTexturas.add(mapas.normalMap);
+    todasTexturas.add(mapas.roughnessMap);
+    return mapas;
   };
 
   const aplicarEnMaterial = (
@@ -721,13 +759,14 @@ export function crearRepositorioMateriales(
     const fisica = PROPIEDADES_FISICAS_TELA[apariencia.tela];
     const mapPrevio = mat.map;
     const texturaAlbedo = obtenerOTexturaAlbedo(apariencia);
-    const bumpPrevio = mat.bumpMap;
-    const bumpNuevo = obtenerBump(apariencia.tela);
+    const normPrevio = mat.normalMap;
+    const pbr = obtenerPbr(apariencia.tela);
 
     mat.color.set(tinteBaseHex);
     mat.map = texturaAlbedo;
-    mat.bumpMap = bumpNuevo;
-    mat.bumpScale = fisica.bumpScale;
+    mat.normalMap = pbr.normalMap;
+    mat.normalScale.set(fisica.normalScale, fisica.normalScale);
+    mat.roughnessMap = pbr.roughnessMap;
     mat.roughness = fisica.roughness;
     mat.metalness = fisica.metalness;
     mat.clearcoat = fisica.clearcoat;
@@ -735,19 +774,20 @@ export function crearRepositorioMateriales(
     mat.sheen = fisica.sheen;
     mat.sheenRoughness = fisica.sheenRoughness;
 
-    // Tinte de brillo satinado/aterciopelado coherente con el color base elegido
     const sheenColor = new THREE.Color(normalizarHex(apariencia.color)).lerp(
       new THREE.Color("#FFFFFF"),
       0.35
     );
     mat.sheenColor.copy(sheenColor);
 
-    if ((mapPrevio === null) !== (texturaAlbedo === null) || (bumpPrevio === null) !== (bumpNuevo === null)) {
+    if (
+      (mapPrevio === null) !== (texturaAlbedo === null) ||
+      (normPrevio === null) !== (pbr.normalMap === null)
+    ) {
       mat.needsUpdate = true;
     }
   };
 
-  // Pre-poblar apariencia inicial
   aplicarEnMaterial(materialPrincipal, APARIENCIA_POR_DEFECTO, "#FFFFFF");
   aplicarEnMaterial(materialSecundario, APARIENCIA_POR_DEFECTO, "#FFFFFF");
   aplicarEnMaterial(materialVista, APARIENCIA_POR_DEFECTO, "#F2ECE4");
@@ -794,7 +834,7 @@ export function crearRepositorioMateriales(
       todasTexturas.forEach((tex) => tex.dispose());
       todasTexturas.clear();
       cacheAlbedo.clear();
-      cacheBump.clear();
+      cachePbr.clear();
     },
   };
 }
