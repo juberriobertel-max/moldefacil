@@ -160,6 +160,7 @@ interface EstadoMotor3D {
   configActual: ConfigPrenda;
   medidasActual: Medidas;
   poseActual: PoseManiquiTipo;
+  telaActual: TipoTela;
 }
 
 function easeInOutCubic(t: number): number {
@@ -313,6 +314,7 @@ export default function Garment3DPreview({
         materialForroOVista: motor.repoMateriales.obtenerMaterialVista(ap),
         mostrarCosturas: ap.mostrarCosturas,
         ajusteTelaStretchM: PROPIEDADES_FISICAS_TELA[ap.tela].ajusteStretchM,
+        tipoTela: ap.tela,
       });
       motor.maniqui.mostrarCintasGuia(
         Boolean(ap.mostrarCosturas || ap.mostrarMapaCalce)
@@ -469,6 +471,7 @@ export default function Garment3DPreview({
       ),
       mostrarCosturas: aparienciaRef.current.mostrarCosturas,
       ajusteTelaStretchM: PROPIEDADES_FISICAS_TELA[telaIni].ajusteStretchM,
+      tipoTela: telaIni,
     });
     prendaIni.grupoCintasMetricas.visible = Boolean(
       aparienciaRef.current.mostrarCosturas ||
@@ -526,6 +529,7 @@ export default function Garment3DPreview({
       configActual: configRef.current,
       medidasActual: medidasRef.current,
       poseActual: poseIni,
+      telaActual: telaIni,
     };
     motorRef.current = motor;
 
@@ -824,6 +828,15 @@ export default function Garment3DPreview({
     motor.repoMateriales.obtenerMaterialSecundario(apariencia);
     motor.repoMateriales.obtenerMaterialVista(apariencia);
     motor.repoMateriales.obtenerMaterialResaltado(apariencia);
+
+    if (motor.telaActual !== apariencia.tela) {
+      motor.telaActual = apariencia.tela;
+      reconstruirPrendaEnMotor(motor, motor.perfilActual, motor.configActual);
+      ultimaProyeccionStrRef.current = "__dirty__";
+      solicitarRender(true);
+      return;
+    }
+
     motor.maniqui.aplicarAcabado(apariencia.acabadoManiqui ?? "lino");
     motor.maniqui.mostrarCintasGuia(
       Boolean(apariencia.mostrarCosturas || apariencia.mostrarMapaCalce)
@@ -850,7 +863,7 @@ export default function Garment3DPreview({
 
     ultimaProyeccionStrRef.current = "__dirty__";
     solicitarRender(true);
-  }, [apariencia, solicitarRender]);
+  }, [apariencia, solicitarRender, reconstruirPrendaEnMotor]);
 
   // Sincronización 2D -> 3D al seleccionar una pieza activa del molde
   useEffect(() => {
@@ -1773,7 +1786,7 @@ export default function Garment3DPreview({
           >
             <RotateCw
               className={`w-4 h-4 shrink-0 ${autoGirar ? "animate-spin" : ""}`}
-              style={autoGirar ? { animationDuration: "5s" } : undefined}
+              style={autoGirar ? { animationDuration: "5s" : undefined } : undefined}
             />
             <span>Girar 360°</span>
           </button>
