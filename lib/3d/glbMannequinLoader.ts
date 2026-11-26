@@ -15,6 +15,7 @@ import {
 import {
   AcabadoManiqui3D,
   AnilloPerfil,
+  EnvolventeTorso3D,
   NombreSeccionAnatomica,
   PerfilCuerpo,
   TrayectoriaBrazo3D,
@@ -137,6 +138,16 @@ export async function cargarManiquiGLB(
 ): Promise<ManiquiInstancia | null> {
   const gltf = await cargarPlantillaGLB();
   if (!gltf) return null;
+  return construirManiquiDesdeGLTF(gltf, perfilInicial);
+}
+
+/**
+ * Construye la instancia articulada y morfeable del maniquí a partir de un `GLTF` ya cargado.
+ */
+export function construirManiquiDesdeGLTF(
+  gltf: GLTF,
+  perfilInicial: PerfilCuerpo
+): ManiquiInstancia {
 
   const grupo = new THREE.Group();
   grupo.name = "maniqui-glb-esculpido";
@@ -178,6 +189,7 @@ export async function cargarManiquiGLB(
   ]);
   const texturasVacias = new Set<THREE.Texture>();
 
+  let cuerpoMesh: THREE.SkinnedMesh | null = null;
   let cuerpoGeometry: THREE.BufferGeometry | null = null;
   let baseBodyPositions: Float32Array | null = null;
 
@@ -195,19 +207,21 @@ export async function cargarManiquiGLB(
       });
     }
 
-    if (obj instanceof THREE.Mesh) {
-      obj.geometry = obj.geometry.clone();
-      obj.castShadow = true;
-      obj.receiveShadow = true;
-      obj.frustumCulled = false;
+    if (obj instanceof THREE.Mesh || (obj as THREE.Mesh).isMesh) {
+      const meshObj = obj as THREE.Mesh;
+      meshObj.geometry = meshObj.geometry.clone();
+      meshObj.castShadow = true;
+      meshObj.receiveShadow = true;
+      meshObj.frustumCulled = false;
 
-      if (obj.name.toLowerCase().includes("eye")) {
-        obj.material = materialDetalle;
+      if (meshObj.name.toLowerCase().includes("eye")) {
+        meshObj.material = materialDetalle;
       } else {
-        obj.material = materialCuerpo;
-        const posAttr = obj.geometry.getAttribute("position");
+        meshObj.material = materialCuerpo;
+        const posAttr = meshObj.geometry.getAttribute("position");
         if (posAttr && (!cuerpoGeometry || posAttr.count > 1500)) {
-          cuerpoGeometry = obj.geometry;
+          cuerpoMesh = meshObj as THREE.SkinnedMesh;
+          cuerpoGeometry = meshObj.geometry;
           baseBodyPositions = new Float32Array(
             posAttr.array as ArrayLike<number>
           );
@@ -291,10 +305,171 @@ export async function cargarManiquiGLB(
     return escalaAltura;
   };
 
+  /**
+   * Extrae una grilla cilíndrica `(y, θ)` con el radio máximo real de la malla posada y deformada
+   * (torso, senos, clavículas, hombros, pelvis y muslos superiores, excluyendo brazos colgantes),
+   * para garantizar 0 intersecciones al construir cualquier prenda.
+   */
+  const extraerEnvolventeCuerpo = (perfil: PerfilCuerpo): EnvolventeTorso3D | undefined => {
+    if (!cuerpoMesh || !cuerpoGeometry || !baseBodyPositions) return undefined;
+    const posAttr = cuerpoGeometry.getAttribute("position");
+    const skinIdxAttr = cuerpoGeometry.getAttribute("skinIndex");
+    const skinWAttr = cuerpoGeometry.getAttribute("skinWeight");
+    const skeleton = cuerpoMesh.skeleton;
+    if (!posAttr || !skinIdxAttr || !skinWAttr || !skeleton) return undefined;
+
+    grupo.updateMatrixWorld(true);
+    skeleton.update();
+    const invGrupo = grupo.matrixWorld.clone().invert();
+    const meshToGrupo = invGrupo.clone().multiply(cuerpoMesh.matrixWorld);
+
+    const rows = 56;
+    const cols = 72;
+    const yMinM = Math.max(0.08, perfil.alturaTobilloM + 0.04);
+    const yMaxM = perfil.cuelloYM + 0.025;
+    const ySpan = Math.max(1e-4, yMaxM - yMinM);
+    const radiosMaxM = new Float32Array(rows * cols);
+    const centrosZM = new Float32Array(rows);
+
+    for (let r = 0; r < rows; r++) {
+      const yRow = yMinM + (r / (rows - 1)) * ySpan;
+      const yEval = clamp(yRow, perfil.musloYM, perfil.cuelloYM);
+      centrosZM[r] = evaluarPerfilEnY(perfil.anillosInterpolados, yEval).desplazamientoZ;
+    }
+
+    const bones = skeleton.bones;
+    const count = posAttr.count;
+    const posedXYZ = new Float32Array(count * 3);
+    const incluir = new Uint8Array(count);
+    const vTmp = new THREE.Vector3();
+
+    for (let i = 0; i < count; i++) {
+      const bx = baseBodyPositions[i * 3];
+      const by = baseBodyPositions[i * 3 + 1];
+
+      let wArmOrHand = 0;
+      let wUpperArm = 0;
+      let wHead = 0;
+      for (let k = 0; k < 4; k++) {
+        const w = skinWAttr.getComponent(i, k);
+        if (w <= 0.01) continue;
+        const bName = bones[skinIdxAttr.getComponent(i, k)]?.name ?? "";
+        if (bName.startsWith("upperarm")) {
+          wUpperArm += w;
+        } else if (
+          bName.startsWith("lowerarm") ||
+          bName.startsWith("hand") ||
+          bName.startsWith("index") ||
+          bName.startsWith("middle") ||
+          bName.startsWith("ring") ||
+          bName.startsWith("pinky") ||
+          bName.startsWith("thumb")
+        ) {
+          wArmOrHand += w;
+        } else if (bName === "Head") {
+          wHead += w;
+        }
+      }
+
+      const esDanglingArm =
+        wArmOrHand > 0.25 ||
+        (wUpperArm > 0.3 && (Math.abs(bx) > 0.168 || by < 1.33));
+      const ok = !esDanglingArm && wHead < 0.45 && by < 1.495;
+      incluir[i] = ok ? 1 : 0;
+      if (!ok) continue;
+
+      vTmp.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+      if (cuerpoMesh.isSkinnedMesh) {
+        cuerpoMesh.applyBoneTransform(i, vTmp);
+      }
+      vTmp.applyMatrix4(meshToGrupo);
+      posedXYZ[i * 3] = vTmp.x;
+      posedXYZ[i * 3 + 1] = vTmp.y;
+      posedXYZ[i * 3 + 2] = vTmp.z;
+    }
+
+    const depositarPunto = (px: number, py: number, pz: number) => {
+      if (py < yMinM - 0.01 || py > yMaxM + 0.01) return;
+      const tY = clamp((py - yMinM) / ySpan, 0, 1);
+      const rFloat = tY * (rows - 1);
+      const r0 = Math.floor(rFloat);
+      const r1 = Math.min(rows - 1, r0 + 1);
+      const dz =
+        centrosZM[r0] + (centrosZM[r1] - centrosZM[r0]) * (rFloat - r0);
+      const rad = Math.hypot(px, pz - dz);
+      const th = Math.atan2(px, pz - dz);
+      const tTh = (th + Math.PI) / (Math.PI * 2);
+      const cFloat = tTh * cols;
+      const c0 = ((Math.floor(cFloat) % cols) + cols) % cols;
+      const c1 = (c0 + 1) % cols;
+
+      const rowsTouch = r0 === r1 ? [r0] : [r0, r1];
+      const colsTouch = [c0, c1];
+      for (const rr of rowsTouch) {
+        for (const cc of colsTouch) {
+          const idx = rr * cols + cc;
+          if (rad > radiosMaxM[idx]) radiosMaxM[idx] = rad;
+        }
+      }
+    };
+
+    const indexAttr = cuerpoGeometry.getIndex();
+    if (indexAttr) {
+      const idxArr = indexAttr.array;
+      for (let t = 0; t < idxArr.length; t += 3) {
+        const ia = idxArr[t];
+        const ib = idxArr[t + 1];
+        const ic = idxArr[t + 2];
+        if (!incluir[ia] || !incluir[ib] || !incluir[ic]) continue;
+
+        const ax = posedXYZ[ia * 3], ay = posedXYZ[ia * 3 + 1], az = posedXYZ[ia * 3 + 2];
+        const bx = posedXYZ[ib * 3], by = posedXYZ[ib * 3 + 1], bz = posedXYZ[ib * 3 + 2];
+        const cx = posedXYZ[ic * 3], cy = posedXYZ[ic * 3 + 1], cz = posedXYZ[ic * 3 + 2];
+
+        const minYTri = Math.min(ay, by, cy);
+        const maxYTri = Math.max(ay, by, cy);
+        if (maxYTri < yMinM - 0.01 || minYTri > yMaxM + 0.01) continue;
+
+        depositarPunto(ax, ay, az);
+        depositarPunto(bx, by, bz);
+        depositarPunto(cx, cy, cz);
+        depositarPunto((ax + bx) * 0.5, (ay + by) * 0.5, (az + bz) * 0.5);
+        depositarPunto((bx + cx) * 0.5, (by + cy) * 0.5, (bz + cz) * 0.5);
+        depositarPunto((cx + ax) * 0.5, (cy + ay) * 0.5, (cz + az) * 0.5);
+        depositarPunto((ax + bx + cx) / 3, (ay + by + cy) / 3, (az + bz + cz) / 3);
+      }
+    } else {
+      for (let i = 0; i < count; i++) {
+        if (!incluir[i]) continue;
+        depositarPunto(posedXYZ[i * 3], posedXYZ[i * 3 + 1], posedXYZ[i * 3 + 2]);
+      }
+    }
+
+    // Dilatación morfológica mínima 3x3 para evitar huecos entre celdas vecinas
+    const dilated = new Float32Array(radiosMaxM);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        let best = radiosMaxM[r * cols + c];
+        for (let dr = -1; dr <= 1; dr++) {
+          const rr = r + dr;
+          if (rr < 0 || rr >= rows) continue;
+          for (let dc = -1; dc <= 1; dc++) {
+            const cc = (c + dc + cols) % cols;
+            const neighbor = radiosMaxM[rr * cols + cc] * (dr === 0 && dc === 0 ? 1 : 0.992);
+            if (neighbor > best) best = neighbor;
+          }
+        }
+        dilated[r * cols + c] = best;
+      }
+    }
+
+    return { yMinM, yMaxM, rows, cols, radiosMaxM: dilated, centrosZM };
+  };
+
   const actualizar = (perfil: PerfilCuerpo) => {
     const escalaAltura = aplicarPoseEnHuesos(perfil);
 
-    // 1. Morfología radial suave del torso/cadera para encajar dentro de la prenda sin colisiones
+    // 1. Morfología radial suave del torso/cadera/clavículas para encajar dentro de la prenda
     if (cuerpoGeometry && baseBodyPositions) {
       const posAttr = cuerpoGeometry.getAttribute("position") as THREE.BufferAttribute;
       const count = posAttr.count;
@@ -304,9 +479,9 @@ export async function cargarManiquiGLB(
         const by = baseBodyPositions[i * 3 + 1];
         const bz = baseBodyPositions[i * 3 + 2];
 
-        // En zona superior (>1.28 m) excluimos brazos en T; en cadera/glúteos todo bx es torso
+        // Cubre todo el torso incluyendo parte alta de pecho y clavículas (1.38..1.47 m)
         const pesoY =
-          smoothstep(0.68, 0.83, by) * (1 - smoothstep(1.38, 1.48, by));
+          smoothstep(0.66, 0.80, by) * (1 - smoothstep(1.44, 1.505, by));
         const enZonaBrazos = smoothstep(1.28, 1.35, by);
         const pesoX = 1 - enZonaBrazos * smoothstep(0.165, 0.215, Math.abs(bx));
         const pesoTorso = pesoY * pesoX;
@@ -341,6 +516,8 @@ export async function cargarManiquiGLB(
       posAttr.needsUpdate = true;
       cuerpoGeometry.computeVertexNormals();
     }
+
+    perfil.envolventeCuerpo = extraerEnvolventeCuerpo(perfil);
 
     // 2. Actualizar cintas guía anatómicas (busto/cintura/cadera)
     while (grupoCintasHost.children.length > 0) {

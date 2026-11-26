@@ -264,6 +264,17 @@ export interface TrayectoriasCuerpo {
   pose: PoseManiquiArticulado;
 }
 
+export interface EnvolventeTorso3D {
+  yMinM: number;
+  yMaxM: number;
+  rows: number;
+  cols: number;
+  /** Radios máximos medidos sobre la malla real del maniquí en espacio local (metros). */
+  radiosMaxM: Float32Array;
+  /** Centro Z de referencia por fila (`evaluarPerfilEnY(..., y).desplazamientoZ`). */
+  centrosZM: Float32Array;
+}
+
 export interface PerfilCuerpo {
   anillosClave: Record<NombreSeccionAnatomica, AnilloPerfil>;
   anillosInterpolados: AnilloPerfil[];
@@ -283,6 +294,8 @@ export interface PerfilCuerpo {
   contornoMusloM: number;
   anchoBotaM: number;
   trayectorias: TrayectoriasCuerpo;
+  /** Campo radial exacto extraído del maniquí 3D posado para evitar perforaciones de tela. */
+  envolventeCuerpo?: EnvolventeTorso3D;
 }
 
 export type NivelDetalle3D = "movil" | "escritorio";
