@@ -68,6 +68,7 @@ export type TipoEscote =
 export type TipoManga =
   | "ninguna"
   | "kimono"
+  | "raglan"
   | "cortaPegada"
   | "largaPegada"
   | "acampanada"
@@ -106,6 +107,8 @@ export type ConfigPrenda = {
   proporcionesFoto?: SolvedTracingProportions;
   bolsillosLaterales?: boolean;
   bolsillosConTapa?: boolean;
+  cortePrincesa?: boolean;
+  canesuEspalda?: boolean;
   subEstiloEspecial?: SubEstiloEspecial3D;
 };
 
@@ -416,6 +419,7 @@ function mapearManga(
 ): TipoManga {
   if (sleeveStyle === "sleeveless") return "ninguna";
   if (sleeveStyle === "kimono") return "kimono";
+  if (sleeveStyle === "raglan") return "raglan";
   if (extras.flaredSleeve) return "acampanada";
   if (sleeveStyle === "long") return "largaPegada";
   return "cortaPegada";
@@ -589,6 +593,10 @@ export function toConfigPrenda(estado: EstadoDelMoldePara3D): ConfigPrenda {
     proporcionesFoto: propsFoto ?? estado.tracingProportions ?? undefined,
     bolsillosLaterales: Boolean(estado.extras.sidePockets),
     bolsillosConTapa: Boolean(estado.extras.flapPockets),
+    cortePrincesa: Boolean(estado.extras.princessSeam),
+    canesuEspalda: Boolean(
+      estado.extras.backYoke || estado.necklineStyle === "shirt_collar"
+    ),
     subEstiloEspecial,
   };
 }

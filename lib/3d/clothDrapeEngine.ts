@@ -387,7 +387,10 @@ export function applySleeveClothDrape(params: {
   const gravityWeights = new Float32Array(rows * cols);
 
   const esStretch = tela === "licra";
-  const esLarga = config.manga === "largaPegada" || config.manga === "acampanada";
+  const esLarga =
+    config.manga === "largaPegada" ||
+    config.manga === "acampanada" ||
+    config.manga === "raglan";
   const esAcampanada = config.manga === "acampanada";
   const esFarol = config.manga === "farol";
 
