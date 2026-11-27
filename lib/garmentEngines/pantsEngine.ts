@@ -15,8 +15,10 @@ import {
   computeEase,
   cubicBezierLength,
   estimateFabricMeters,
+  findCubicBezierTForY,
   normalizePiece,
   packPiecesOnSheet,
+  splitCubicBezier,
 } from "./geometry";
 import {
   buildFlapPocketPieces,
@@ -142,18 +144,75 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
           },
         ];
 
+  const hasItalianPocketCutout =
+    useWovenDarts && (Boolean(extras?.sidePockets) || subStyle !== "shorts");
+
+  const upperOutHipP0 = { x: frontOutHipX, y: crotchDepth };
+  const upperOutHipCp1 = { x: frontOutHipX, y: crotchDepth * 0.5 };
+  const upperOutHipCp2 = { x: frontOutWaistX, y: crotchDepth * 0.25 };
+  const upperOutHipP3 = { x: frontOutWaistX, y: 1.0 };
+
+  const pocketMouthBotTargetY = Number(
+    Math.min(crotchDepth - 3.0, Math.max(13.5, crotchDepth * 0.6)).toFixed(2)
+  );
+  const pocketSplitT = findCubicBezierTForY(
+    upperOutHipP0,
+    upperOutHipCp1,
+    upperOutHipCp2,
+    upperOutHipP3,
+    pocketMouthBotTargetY
+  );
+  const splitOutHip = splitCubicBezier(
+    upperOutHipP0,
+    upperOutHipCp1,
+    upperOutHipCp2,
+    upperOutHipP3,
+    pocketSplitT
+  );
+  const pocketBotPt = splitOutHip.first[3];
+  const tWaistMouth = Math.min(
+    0.26,
+    4.2 / Math.max(8, Math.hypot(frontInWaistX - frontOutWaistX, 1.0))
+  );
+  const pocketTopPt = {
+    x: Number((frontOutWaistX + (frontInWaistX - frontOutWaistX) * tWaistMouth).toFixed(2)),
+    y: Number((1.0 - tWaistMouth).toFixed(2)),
+  };
+  const pocketMouthLen = Number(
+    Math.hypot(pocketTopPt.x - pocketBotPt.x, pocketTopPt.y - pocketBotPt.y).toFixed(2)
+  );
+
   const frontOutUpperCurve: PathCommand = {
     type: "C",
-    cp1x: frontOutHipX,
-    cp1y: crotchDepth * 0.5,
-    cp2x: frontOutWaistX,
-    cp2y: crotchDepth * 0.25,
-    x: frontOutWaistX,
-    y: 1.0,
+    cp1x: upperOutHipCp1.x,
+    cp1y: upperOutHipCp1.y,
+    cp2x: upperOutHipCp2.x,
+    cp2y: upperOutHipCp2.y,
+    x: upperOutHipP3.x,
+    y: upperOutHipP3.y,
   };
 
+  const frontOutUpperCutSegments: PathCommand[] = hasItalianPocketCutout
+    ? [
+        {
+          type: "C",
+          cp1x: splitOutHip.first[1].x,
+          cp1y: splitOutHip.first[1].y,
+          cp2x: splitOutHip.first[2].x,
+          cp2y: splitOutHip.first[2].y,
+          x: pocketBotPt.x,
+          y: pocketBotPt.y,
+        },
+        { type: "L", x: pocketTopPt.x, y: pocketTopPt.y },
+      ]
+    : [frontOutUpperCurve];
+
   const frontSeam: PathCommand[] = [
-    { type: "M", x: frontOutWaistX, y: 1.0 },
+    {
+      type: "M",
+      x: hasItalianPocketCutout ? pocketTopPt.x : frontOutWaistX,
+      y: hasItalianPocketCutout ? pocketTopPt.y : 1.0,
+    },
     { type: "L", x: frontInWaistX, y: 0 },
     { type: "L", x: frontInWaistX, y: crotchDepth * 0.58 },
     {
@@ -171,7 +230,7 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
       : [{ type: "L" as const, x: frontCenterX + frontHemHalf, y: totalLen }]),
     { type: "L", x: frontCenterX - frontHemHalf, y: totalLen },
     ...frontOutseamMid,
-    frontOutUpperCurve,
+    ...frontOutUpperCutSegments,
     { type: "Z" },
   ];
 
@@ -269,7 +328,7 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
           ...(subStyle !== "shorts"
             ? [{ x: frontCenterX - frontKneeHalf, y: kneeY, angle: 180, label: "Rodilla" }]
             : []),
-          ...(extras?.sidePockets
+          ...(extras?.sidePockets && !hasItalianPocketCutout
             ? createSidePocketNotches({
                 waistX: frontOutWaistX,
                 waistY: 1.0,
@@ -277,7 +336,24 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
                 hipY: crotchDepth,
                 angle: 180,
               })
-            : []),
+            : hasItalianPocketCutout
+              ? [
+                  {
+                    x: pocketTopPt.x,
+                    y: pocketTopPt.y,
+                    angle: -90,
+                    label: "Boca sup.",
+                    count: 1 as const,
+                  },
+                  {
+                    x: pocketBotPt.x,
+                    y: pocketBotPt.y,
+                    angle: 180,
+                    label: "Boca inf.",
+                    count: 2 as const,
+                  },
+                ]
+              : []),
         ],
         internalLines: frontInternals.length > 0 ? frontInternals : undefined,
         labelPos: { x: frontCenterX, y: crotchDepth * 1.15 },
@@ -290,6 +366,7 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
           waist: Number(quarterWaist.toFixed(2)),
           inseam: Number(frontInseamLen.toFixed(2)),
           outseam: Number(frontOutseamLen.toFixed(2)),
+          ...(hasItalianPocketCutout ? { pocketMouth: pocketMouthLen } : {}),
         },
       },
       seamAllowance
@@ -516,7 +593,13 @@ export function generatePantsPattern(input: PantsEngineInput): PatternResult {
   if (extras?.sidePockets || (useWovenDarts && subStyle !== "shorts")) {
     pieces.push(
       ...(useWovenDarts
-        ? buildItalianPocketPieces(seamAllowance)
+        ? buildItalianPocketPieces(seamAllowance, {
+            mouthTopDx: Number((pocketTopPt.x - frontOutWaistX).toFixed(2)),
+            mouthTopDy: Number((pocketTopPt.y - 1.0).toFixed(2)),
+            mouthBotDx: Number((pocketBotPt.x - frontOutWaistX).toFixed(2)),
+            mouthBotDy: Number((pocketBotPt.y - 1.0).toFixed(2)),
+            mouthLengthCm: pocketMouthLen,
+          })
         : [buildPocketBagPiece(seamAllowance)])
     );
   }

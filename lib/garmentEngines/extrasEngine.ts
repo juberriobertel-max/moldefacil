@@ -12,9 +12,12 @@ import {
   TorsoFit,
 } from "../types";
 import {
+  buildNecklineCommand,
   commandsArcLength,
   cubicBezierLength,
+  findCubicBezierTForY,
   normalizePiece,
+  splitCubicBezier,
 } from "./geometry";
 import {
   computeAsymmetricSleeveCapArcLengthCm,
@@ -298,8 +301,12 @@ export function buildSleevePiece(params: {
     return null;
   }
 
-  const effectiveStyle: Exclude<SleeveStyle, "sleeveless" | "kimono"> =
-    sleeveStyle === "sleeveless" ? "short" : sleeveStyle;
+  const effectiveStyle: "short" | "long" =
+    sleeveStyle === "sleeveless"
+      ? "short"
+      : sleeveStyle === "raglan"
+        ? "long"
+        : sleeveStyle;
 
   const easeSpec = getTargetCapEaseRange(fabricType, garmentKind);
   const minBicepW = bicepCm ? bicepCm + (fabricType === "stretch" ? 1.5 : 4.5) : 0;
@@ -1868,78 +1875,332 @@ export function buildTrouserFlyPieces(params: {
   return [aletaPiece, aletillaPiece];
 }
 
+export interface ShirtBackYokeData {
+  yokePiece: PatternPiece;
+  splitYCm: number;
+  yokeJoinXCm: number;
+  forwardShoulderCm: number;
+  pleatHalfCm: number;
+  upperArmholeLenCm: number;
+  lowerArmholeCmd: Extract<PathCommand, { type: "C" }>;
+  lowerArmholeLenCm: number;
+  backNeckArcCm: number;
+}
+
 /**
- * Generates Italian slanted trouser pocket bag ("Bolsa Bolsillo Italiano x2")
- * and pocket facing ("Vista Boca Bolsillo x2").
+ * Generates real Shirt Back Yoke ("Canesú Trasero x2 al doblez") with:
+ * - 1.5 cm forward shoulder transfer onto the yoke,
+ * - exact de Casteljau armhole split matching lower back panel,
+ * - 3.0 cm half-pleat (6 cm full CB box pleat) when lower back is cut on fold.
+ */
+export function buildShirtBackYokeGeometry(params: {
+  neckW: number;
+  backNeckDrop: number;
+  backShoulderX: number;
+  shoulderSlope: number;
+  armholeDepth: number;
+  backQuarterBust: number;
+  backArmholeCmd: Extract<PathCommand, { type: "C" }>;
+  cutLowerBackOnFold?: boolean;
+  forwardShoulderCm?: number;
+  boxPleatHalfCm?: number;
+  seamAllowance: SeamAllowance;
+}): ShirtBackYokeData {
+  const {
+    neckW,
+    backNeckDrop,
+    backShoulderX,
+    shoulderSlope,
+    armholeDepth,
+    backQuarterBust,
+    backArmholeCmd,
+    cutLowerBackOnFold = true,
+    forwardShoulderCm = 1.5,
+    boxPleatHalfCm = 3.0,
+    seamAllowance,
+  } = params;
+
+  const fwd = forwardShoulderCm;
+  // Shifted back armhole starts fwd cm higher than original shoulder line
+  const shiftedP0 = { x: backShoulderX, y: shoulderSlope - fwd };
+  const shiftedCp1 = { x: backArmholeCmd.cp1x, y: backArmholeCmd.cp1y - fwd * 0.65 };
+  const shiftedCp2 = { x: backArmholeCmd.cp2x, y: backArmholeCmd.cp2y };
+  const shiftedP3 = { x: backQuarterBust, y: armholeDepth };
+
+  const targetSplitY = Number(
+    Math.min(armholeDepth - 3.5, Math.max(shoulderSlope + 5.5, backNeckDrop + 9.5)).toFixed(2)
+  );
+  const tSplit = findCubicBezierTForY(
+    shiftedP0,
+    shiftedCp1,
+    shiftedCp2,
+    shiftedP3,
+    targetSplitY
+  );
+  const splitArm = splitCubicBezier(shiftedP0, shiftedCp1, shiftedCp2, shiftedP3, tSplit);
+  const splitPt = splitArm.first[3];
+  const splitYCm = Number(splitPt.y.toFixed(2));
+  const yokeJoinXCm = Number(splitPt.x.toFixed(2));
+
+  const upperArmholeLenCm = Number(
+    cubicBezierLength(
+      splitArm.first[0],
+      splitArm.first[1],
+      splitArm.first[2],
+      splitArm.first[3],
+      28
+    ).toFixed(2)
+  );
+  const lowerArmholeCmd: Extract<PathCommand, { type: "C" }> = {
+    type: "C",
+    cp1x: Number(splitArm.second[1].x.toFixed(2)),
+    cp1y: Number(splitArm.second[1].y.toFixed(2)),
+    cp2x: Number(splitArm.second[2].x.toFixed(2)),
+    cp2y: Number(splitArm.second[2].y.toFixed(2)),
+    x: Number(splitArm.second[3].x.toFixed(2)),
+    y: Number(splitArm.second[3].y.toFixed(2)),
+  };
+  const lowerArmholeLenCm = Number(
+    cubicBezierLength(
+      splitArm.second[0],
+      splitArm.second[1],
+      splitArm.second[2],
+      splitArm.second[3],
+      28
+    ).toFixed(2)
+  );
+
+  // Build yoke piece shifted down by +fwd so all local Y >= 0
+  const cbNeckY = Number((backNeckDrop + fwd * 0.45).toFixed(2));
+  const neckCmds = buildNecklineCommand(neckW, cbNeckY, "round");
+  const backNeckArcCm = Number(
+    commandsArcLength([{ type: "M", x: 0, y: cbNeckY }, ...neckCmds]).toFixed(2)
+  );
+  const yokeBottomY = Number((splitYCm + fwd).toFixed(2));
+  const yokeSeam: PathCommand[] = [
+    { type: "M", x: 0, y: cbNeckY },
+    ...neckCmds,
+    { type: "L", x: backShoulderX, y: shoulderSlope },
+    {
+      type: "C",
+      cp1x: Number(splitArm.first[1].x.toFixed(2)),
+      cp1y: Number((splitArm.first[1].y + fwd).toFixed(2)),
+      cp2x: Number(splitArm.first[2].x.toFixed(2)),
+      cp2y: Number((splitArm.first[2].y + fwd).toFixed(2)),
+      x: yokeJoinXCm,
+      y: yokeBottomY,
+    },
+    { type: "L", x: 0, y: yokeBottomY },
+    { type: "Z" },
+  ];
+
+  const backShoulderLen = Number(Math.hypot(backShoulderX - neckW, shoulderSlope).toFixed(2));
+  const pleatHalfCm = cutLowerBackOnFold ? boxPleatHalfCm : 0;
+
+  const yokePiece = normalizePiece(
+    {
+      id: "back_yoke",
+      name: "CANESÚ TRASERO CAMISERO (x2 al doblez)",
+      subtitle: `Hombro adelantado ${fwd} cm | Costura canesú: ${yokeJoinXCm.toFixed(1)} cm${pleatHalfCm > 0 ? ` | Tabla +${(pleatHalfCm * 2).toFixed(0)} cm` : ""}`,
+      tabLabel: "Canesú Trasero",
+      seamPath: yokeSeam,
+      grainline: {
+        x1: Math.max(3, yokeJoinXCm * 0.35),
+        y1: yokeBottomY - 1.8,
+        x2: Math.max(6, yokeJoinXCm * 0.72),
+        y2: yokeBottomY - 1.8,
+      },
+      notches: [
+        {
+          x: Number((yokeJoinXCm * 0.5).toFixed(2)),
+          y: yokeBottomY,
+          angle: 90,
+          label: "Encuentro canesú",
+          count: 2,
+        },
+        {
+          x: Number((backShoulderX - (backShoulderX - yokeJoinXCm) * 0.35).toFixed(2)),
+          y: Number((yokeBottomY * 0.58).toFixed(2)),
+          angle: 0,
+          label: "Sisa tras.",
+          count: 2,
+        },
+      ],
+      labelPos: { x: yokeJoinXCm * 0.45, y: yokeBottomY * 0.62 },
+      labelMaxSpanCm: Math.max(8, yokeJoinXCm - 2),
+      labelBandWidthCm: Math.max(4, yokeBottomY - cbNeckY),
+      foldLine: { x1: 0, y1: cbNeckY, x2: 0, y2: yokeBottomY },
+      edgeAllowances: { 0: "curve", 1: "seam", 2: "curve", 3: "seam", 4: "fold" },
+      cutQuantity: 2,
+      cutOnFold: true,
+      seamAnchors: {
+        shoulder: backShoulderLen,
+        armhole: upperArmholeLenCm,
+        neckline: backNeckArcCm,
+        yokeSeam: yokeJoinXCm,
+      },
+    },
+    seamAllowance
+  );
+
+  return {
+    yokePiece,
+    splitYCm,
+    yokeJoinXCm,
+    forwardShoulderCm: fwd,
+    pleatHalfCm,
+    upperArmholeLenCm,
+    lowerArmholeCmd,
+    lowerArmholeLenCm,
+    backNeckArcCm,
+  };
+}
+
+/**
+ * Generates parametric 2-piece Italian slanted trouser pocket pieces synchronized
+ * with the front leg mouth geometry:
+ * 1) `italian_pocket_upperbag`: upper bag cut along the exact slanted pocket mouth.
+ * 2) `italian_pocket_underbag`: under bag with integrated side/waist corner & self-facing line.
  */
 export function buildItalianPocketPieces(
-  seamAllowance: SeamAllowance
+  seamAllowance: SeamAllowance,
+  geometry?: {
+    mouthTopDx?: number;
+    mouthTopDy?: number;
+    mouthBotDx?: number;
+    mouthBotDy?: number;
+    mouthLengthCm?: number;
+    bagDepthCm?: number;
+  }
 ): PatternPiece[] {
-  const bagW = 16.5;
-  const bagH = 26;
-  const mouthDrop = 16;
+  const mouthTopDx = geometry?.mouthTopDx ?? 4.2;
+  const mouthTopDy = geometry?.mouthTopDy ?? 0;
+  const mouthBotDx = geometry?.mouthBotDx ?? -1.2;
+  const mouthBotDy = geometry?.mouthBotDy ?? 15.5;
+  const mouthLengthCm = Number(
+    (
+      geometry?.mouthLengthCm ??
+      Math.hypot(mouthTopDx - mouthBotDx, mouthTopDy - mouthBotDy)
+    ).toFixed(2)
+  );
 
-  const bagSeam: PathCommand[] = [
-    { type: "M", x: 0, y: 0 },
-    { type: "L", x: bagW * 0.72, y: 0 },
-    { type: "L", x: bagW, y: mouthDrop },
+  const bagW = Math.max(15.5, mouthTopDx + 11.5);
+  const bagH = Math.max(25, Math.round(geometry?.bagDepthCm ?? Math.max(25, mouthBotDy + 10)));
+  const minX = Math.min(0, mouthBotDx);
+
+  // 1. Upper pocket bag — starts at pocket mouth top (follows slanted opening directly)
+  const upperBagSeam: PathCommand[] = [
+    { type: "M", x: mouthTopDx, y: mouthTopDy },
+    { type: "L", x: bagW, y: 0 },
+    { type: "L", x: bagW, y: bagH * 0.68 },
     {
       type: "C",
       cp1x: bagW,
-      cp1y: bagH - 1.5,
-      cp2x: bagW * 0.45,
-      cp2y: bagH,
-      x: 0,
+      cp1y: bagH,
+      cp2x: bagW * 0.42,
+      cp2y: bagH + 0.5,
+      x: minX,
       y: bagH - 2,
     },
+    { type: "L", x: mouthBotDx, y: mouthBotDy },
+    { type: "L", x: mouthTopDx, y: mouthTopDy },
     { type: "Z" },
   ];
 
-  const bagPiece = normalizePiece(
+  const upperBagPiece = normalizePiece(
     {
-      id: "italian_pocket_bag",
-      name: "BOLSA BOLSILLO ITALIANO (x2)",
-      subtitle: "Cortar 2 pares en forro o popelina",
-      tabLabel: "Bolsa Italiano",
-      seamPath: bagSeam,
-      grainline: { x1: bagW * 0.45, y1: 3, x2: bagW * 0.45, y2: bagH - 4 },
+      id: "italian_pocket_upperbag",
+      name: "BOLSA SUP. BOLSILLO ITALIANO (x2)",
+      subtitle: `Boca inclinada ${mouthLengthCm.toFixed(1)} cm | Cortar 2 en forro/popelina`,
+      tabLabel: "Bolsa Sup.",
+      seamPath: upperBagSeam,
+      grainline: { x1: bagW * 0.52, y1: 3, x2: bagW * 0.52, y2: bagH - 4 },
       notches: [
-        { x: bagW * 0.72, y: 0, angle: -90, label: "Cintura" },
-        { x: bagW, y: mouthDrop, angle: 0, label: "Costado" },
+        { x: mouthTopDx, y: mouthTopDy, angle: -90, label: "Boca sup.", count: 1 },
+        { x: mouthBotDx, y: mouthBotDy, angle: 180, label: "Boca inf.", count: 2 },
       ],
-      labelPos: { x: bagW * 0.48, y: bagH * 0.52 },
-      cutQuantity: 4,
+      labelPos: { x: bagW * 0.54, y: bagH * 0.52 },
+      edgeAllowances: { 0: "seam", 4: "seam" },
+      cutQuantity: 2,
+      seamAnchors: {
+        pocketMouth: mouthLengthCm,
+      },
     },
     seamAllowance
   );
 
-  const facingW = 6.5;
-  const facingSeam: PathCommand[] = [
+  // 2. Under bag with integrated side/waist corner + self-fabric facing boundary line
+  const facingInnerTopX = Number((mouthTopDx + 4.5).toFixed(2));
+  const facingInnerBotX = Number((Math.max(facingInnerTopX, mouthBotDx + 7.5)).toFixed(2));
+
+  const underBagSeam: PathCommand[] = [
     { type: "M", x: 0, y: 0 },
-    { type: "L", x: facingW, y: 0 },
-    { type: "L", x: facingW + 2.5, y: mouthDrop + 2 },
-    { type: "L", x: 2.5, y: mouthDrop + 2 },
+    { type: "L", x: bagW, y: 0 },
+    { type: "L", x: bagW, y: bagH * 0.68 },
+    {
+      type: "C",
+      cp1x: bagW,
+      cp1y: bagH,
+      cp2x: bagW * 0.42,
+      cp2y: bagH + 0.5,
+      x: minX,
+      y: bagH - 2,
+    },
+    { type: "L", x: mouthBotDx, y: mouthBotDy },
+    {
+      type: "C",
+      cp1x: mouthBotDx * 0.6,
+      cp1y: mouthBotDy * 0.58,
+      cp2x: mouthBotDx * 0.25,
+      cp2y: mouthBotDy * 0.25,
+      x: 0,
+      y: 0,
+    },
     { type: "Z" },
   ];
 
-  const facingPiece = normalizePiece(
+  const underBagPiece = normalizePiece(
     {
-      id: "italian_pocket_facing",
-      name: "VISTA BOLSILLO ITALIANO (x2)",
-      subtitle: "Cortar 2 piezas en tela principal",
-      tabLabel: "Vista Bolsillo",
-      seamPath: facingSeam,
-      grainline: { x1: facingW * 0.5, y1: 2.5, x2: facingW * 0.5 + 1.5, y2: mouthDrop },
-      notches: [{ x: facingW * 0.5, y: 0, angle: -90, label: "Cintura" }],
-      labelPos: { x: facingW * 0.65, y: mouthDrop * 0.55 },
-      labelAngle: -78,
-      labelMaxSpanCm: mouthDrop,
-      labelBandWidthCm: facingW,
+      id: "italian_pocket_underbag",
+      name: "BOLSA INF. + VISTA INTEGRADA (x2)",
+      subtitle: `Reconstruye costado/cintura | Boca ${mouthLengthCm.toFixed(1)} cm (Cortar 2)`,
+      tabLabel: "Bolsa Inf. + Vista",
+      seamPath: underBagSeam,
+      grainline: { x1: bagW * 0.5, y1: 3, x2: bagW * 0.5, y2: bagH - 4 },
+      notches: [
+        { x: mouthTopDx, y: mouthTopDy, angle: -90, label: "Cintura / boca", count: 1 },
+        { x: mouthBotDx, y: mouthBotDy, angle: 180, label: "Tope costado", count: 2 },
+      ],
+      internalLines: [
+        {
+          commands: [
+            { type: "M", x: mouthTopDx, y: mouthTopDy },
+            { type: "L", x: mouthBotDx, y: mouthBotDy },
+          ],
+          style: "mark",
+          label: "Borde boca",
+          labelPos: { x: (mouthTopDx + mouthBotDx) * 0.5, y: mouthBotDy * 0.45 },
+        },
+        {
+          commands: [
+            { type: "M", x: facingInnerTopX, y: 0 },
+            { type: "L", x: facingInnerBotX, y: mouthBotDy + 2.5 },
+            { type: "L", x: minX, y: mouthBotDy + 2.5 },
+          ],
+          style: "mark",
+          label: "Vista tela principal",
+          labelPos: { x: facingInnerBotX * 0.55, y: mouthBotDy + 1.2 },
+        },
+      ],
+      labelPos: { x: bagW * 0.5, y: bagH * 0.52 },
       cutQuantity: 2,
       interfacingQuantity: 2,
+      seamAnchors: {
+        pocketMouth: mouthLengthCm,
+      },
     },
     seamAllowance
   );
 
-  return [bagPiece, facingPiece];
+  return [upperBagPiece, underBagPiece];
 }
