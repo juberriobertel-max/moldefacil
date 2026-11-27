@@ -1317,6 +1317,7 @@ export default function HomePage() {
                                   { id: "short", label: "Manga corta" },
                                   { id: "long", label: "Manga larga" },
                                   { id: "kimono", label: "Kimono / Murciélago" },
+                                  { id: "raglan", label: "Manga Raglán" },
                                 ] as const
                               ).map((sl) => (
                                 <button
@@ -1502,6 +1503,7 @@ export default function HomePage() {
                           const proFields: Array<{
                             key: keyof Pick<
                               Measurements,
+                              | "highBust"
                               | "frontBodiceLength"
                               | "bustHeight"
                               | "bustSeparation"
@@ -1515,6 +1517,14 @@ export default function HomePage() {
                             max: number;
                             show: boolean;
                           }> = [
+                            {
+                              key: "highBust",
+                              label: "Contorno sobre busto (copa)",
+                              autoVal: autoPro.highBust,
+                              min: 50,
+                              max: 155,
+                              show: showUpperBodyControls,
+                            },
                             {
                               key: "frontBodiceLength",
                               label: "Talle delantero",
@@ -1606,11 +1616,28 @@ export default function HomePage() {
                                     </div>
                                   ))}
                               </div>
+                              {autoPro.hasCustomHighBust && showUpperBodyControls && (
+                                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-teal-50 border border-teal-200 text-[11px] font-semibold text-teal-800">
+                                  <span>
+                                    Ajuste FBA/SBA: {autoPro.cupLabel} (Δ{" "}
+                                    {autoPro.fbaTotalCm >= 0 ? "+" : ""}
+                                    {autoPro.fbaTotalCm.toFixed(1)} cm)
+                                  </span>
+                                  <span>
+                                    {Math.abs(autoPro.fbaTotalCm) < 0.5
+                                      ? "Base estándar"
+                                      : autoPro.fbaTotalCm > 0
+                                        ? "Proyección busto + pinza"
+                                        : "Ajuste copa pequeña"}
+                                  </span>
+                                </div>
+                              )}
                               <button
                                 type="button"
                                 onClick={() =>
                                   setMeasurements({
                                     ...measurements,
+                                    highBust: undefined,
                                     frontBodiceLength: undefined,
                                     bustHeight: undefined,
                                     bustSeparation: undefined,
@@ -2337,6 +2364,7 @@ export default function HomePage() {
                 : "Proyector"
         }
         pageCount={paperFormat === "projector" ? 1 : totalSheetPages + 2}
+        seamValidation={pattern.seamValidation}
       />
     </div>
   );
