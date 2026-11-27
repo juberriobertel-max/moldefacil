@@ -36,7 +36,7 @@ export type NecklineStyle =
   | "high"
   | "tailored_lapel"
   | "shirt_collar";
-export type SleeveStyle = "sleeveless" | "short" | "long" | "kimono";
+export type SleeveStyle = "sleeveless" | "short" | "long" | "kimono" | "raglan";
 export type TorsoFit = "fitted" | "loose";
 
 export type PaperFormat = "letter" | "a4" | "a0" | "projector";
@@ -68,6 +68,7 @@ export interface Measurements {
   bicep?: number;
   wrist?: number;
   hipHeight?: number;
+  highBust?: number;
 }
 
 export type PathCommand =
@@ -112,6 +113,10 @@ export interface PieceSeamAnchors {
   sleeveCapTargetEase?: [number, number];
   waistband?: number;
   collarBase?: number;
+  pocketMouth?: number;
+  yokeSeam?: number;
+  princessSeam?: number;
+  raglanSeam?: number;
 }
 
 export interface PatternPiece {
@@ -218,6 +223,8 @@ export interface GarmentExtras {
   hemRuffle: boolean;
   sidePockets: boolean;
   flapPockets: boolean;
+  princessSeam?: boolean;
+  backYoke?: boolean;
 }
 
 export const DEFAULT_GARMENT_EXTRAS: GarmentExtras = {
@@ -227,6 +234,8 @@ export const DEFAULT_GARMENT_EXTRAS: GarmentExtras = {
   hemRuffle: false,
   sidePockets: false,
   flapPockets: false,
+  princessSeam: false,
+  backYoke: false,
 };
 
 export type QuickLengthPreset = "photo" | "mini" | "knee" | "midi" | "maxi";

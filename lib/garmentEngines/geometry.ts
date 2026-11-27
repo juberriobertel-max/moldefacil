@@ -29,6 +29,120 @@ export function commandsToSvgPath(commands: PathCommand[]): string {
     .join(" ");
 }
 
+export function evalCubicBezier(
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+  t: number
+): Point2D {
+  const u = Math.max(0, Math.min(1, t));
+  const mt = 1 - u;
+  return {
+    x:
+      mt * mt * mt * p0.x +
+      3 * mt * mt * u * p1.x +
+      3 * mt * u * u * p2.x +
+      u * u * u * p3.x,
+    y:
+      mt * mt * mt * p0.y +
+      3 * mt * mt * u * p1.y +
+      3 * mt * u * u * p2.y +
+      u * u * u * p3.y,
+  };
+}
+
+export function evalCubicBezierTangent(
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+  t: number
+): Point2D {
+  const u = Math.max(0, Math.min(1, t));
+  const mt = 1 - u;
+  return {
+    x:
+      3 * mt * mt * (p1.x - p0.x) +
+      6 * mt * u * (p2.x - p1.x) +
+      3 * u * u * (p3.x - p2.x),
+    y:
+      3 * mt * mt * (p1.y - p0.y) +
+      6 * mt * u * (p2.y - p1.y) +
+      3 * u * u * (p3.y - p2.y),
+  };
+}
+
+export function splitCubicBezier(
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+  t: number
+): {
+  first: [Point2D, Point2D, Point2D, Point2D];
+  second: [Point2D, Point2D, Point2D, Point2D];
+} {
+  const u = Math.max(0, Math.min(1, t));
+  const lerpPt = (a: Point2D, b: Point2D): Point2D => ({
+    x: Number((a.x + (b.x - a.x) * u).toFixed(3)),
+    y: Number((a.y + (b.y - a.y) * u).toFixed(3)),
+  });
+  const q0 = lerpPt(p0, p1);
+  const q1 = lerpPt(p1, p2);
+  const q2 = lerpPt(p2, p3);
+  const r0 = lerpPt(q0, q1);
+  const r1 = lerpPt(q1, q2);
+  const s = lerpPt(r0, r1);
+  return {
+    first: [p0, q0, r0, s],
+    second: [s, r1, q2, p3],
+  };
+}
+
+export function findCubicBezierTForY(
+  p0: Point2D,
+  p1: Point2D,
+  p2: Point2D,
+  p3: Point2D,
+  targetY: number,
+  steps = 40
+): number {
+  let prevT = 0;
+  let prevDiff = evalCubicBezier(p0, p1, p2, p3, 0).y - targetY;
+  let bestT = 0;
+  let bestAbs = Math.abs(prevDiff);
+
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const diff = evalCubicBezier(p0, p1, p2, p3, t).y - targetY;
+    const abs = Math.abs(diff);
+    if (abs < bestAbs) {
+      bestAbs = abs;
+      bestT = t;
+    }
+    if ((prevDiff <= 0 && diff >= 0) || (prevDiff >= 0 && diff <= 0)) {
+      let lo = prevT;
+      let hi = t;
+      let loDiff = prevDiff;
+      for (let k = 0; k < 18; k++) {
+        const mid = (lo + hi) / 2;
+        const mDiff = evalCubicBezier(p0, p1, p2, p3, mid).y - targetY;
+        if ((loDiff <= 0 && mDiff >= 0) || (loDiff >= 0 && mDiff <= 0)) {
+          hi = mid;
+        } else {
+          lo = mid;
+          loDiff = mDiff;
+        }
+      }
+      return (lo + hi) / 2;
+    }
+    prevT = t;
+    prevDiff = diff;
+  }
+  return bestT;
+}
+
 export function sampleCubicBezier(
   p0: Point2D,
   p1: Point2D,

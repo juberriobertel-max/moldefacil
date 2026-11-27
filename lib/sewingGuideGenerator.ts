@@ -246,6 +246,12 @@ export function generateSewingGuide(pattern: PatternResult): SewingGuide {
   const hasWrap = pieceIds.has("wrap_facing");
   const hasShirtCollar = pieceIds.has("collar_stand") || pieceIds.has("shirt_collar");
   const hasFly = pieceIds.has("fly_facing");
+  const hasItalianPocketCutout = pieceIds.has("italian_pocket_upperbag");
+  const hasBackYoke = pieceIds.has("back_yoke");
+  const hasPrincessSeams =
+    pieceIds.has("front_center") && pieceIds.has("front_side");
+  const sleevePiece = pattern.pieces.find((p) => p.id === "sleeve");
+  const hasRaglan = typeof sleevePiece?.seamAnchors?.raglanSeam === "number";
   const hasTwoPieceSleeve = pieceIds.has("upper_sleeve") && pieceIds.has("under_sleeve");
   const isSemicircular = label.includes("semicircular");
   const hasInterfacing = pattern.pieces.some((p) => (p.interfacingQuantity ?? 0) > 0);
@@ -253,7 +259,7 @@ export function generateSewingGuide(pattern: PatternResult): SewingGuide {
   return {
     title: `Guía de Confección — ${pattern.subStyleLabel}`,
     difficulty:
-      hasTailoredLapel || hasTwoPieceSleeve
+      hasTailoredLapel || hasTwoPieceSleeve || hasPrincessSeams || hasBackYoke
         ? "Avanzado (Sastrería)"
         : "Intermedio",
     recommendedFabrics:
@@ -281,17 +287,27 @@ export function generateSewingGuide(pattern: PatternResult): SewingGuide {
       hasTailoredLapel
         ? "1. Cose las pinzas de busto (planchando hacia abajo) y pinzas verticales de entalle (hacia el centro), y fusiona entretela en Vista de Solapa y Cuello Inferior."
         : hasFly
-          ? "1. Cose pinzas traseras planchando hacia el centro, arma los bolsillos italianos con su vista e instala la aleta y aletilla de cierre en el delantero."
-          : isSemicircular
-            ? "1. Une costados y centro espalda instalando cierre invisible (margen 2 cm). Coloca la pretina con entretela y deja colgar la falda 24 h al bies antes de emparejar el ruedo."
-            : "1. Cose primero las pinzas de busto (hacia abajo) y pinzas de cintura (hacia el centro); luego une hombros y costados haciendo coincidir piquetes (1 delantero, 2 espalda).",
-      hasTwoPieceSleeve
-        ? "2. Arma la manga sastre uniendo Hoja Superior e Inferior por codo y costura interna, pasa embebido en copa y pega haciendo coincidir piquetes 1 del. / 2 esp."
-        : pieceIds.has("sleeve")
-          ? `2. Pasa doble pespunte de embebido en la copa de la manga${pieceIds.has("shirt_cuff") ? ", arma la portañuela y pega el puño con entretela" : ""} y encaja piquetes (1 delantero, 2 espalda).`
-          : hasShirtCollar
-            ? "2. Fusiona entretela en Pie de Cuello y Cuello Superior, ármalos y únelos al escote haciendo coincidir piquetes de hombro y centro."
-            : "2. Fusiona entretela en las vistas anatómicas de escote o pretina, une por hombros y asienta con pespunte invisible.",
+          ? hasItalianPocketCutout
+            ? "1. Cose pinzas traseras planchando hacia el centro; une Bolsa Sup. por la boca inclinada de Pierna Del., voltea/asienta con pespunte y fija Bolsa Inf. + Vista para reconstruir la esquina de cintura y costado; instala luego aleta y aletilla de cierre."
+            : "1. Cose pinzas traseras planchando hacia el centro, arma los bolsillos italianos con su vista e instala la aleta y aletilla de cierre en el delantero."
+          : hasPrincessSeams
+            ? "1. Une cada Centro con su Costadillo Princesa derecho con derecho haciendo coincidir piquetes de busto/omóplato y cintura, piquetea márgenes curvos, plancha abierto y cierra hombros y costados."
+            : hasBackYoke
+              ? "1. Forma el tablón central de 6 cm en el Trasero inferior siguiendo piquetes, envuélvelo entre los 2 Canesúes (método burrito) incluyendo la unión limpia de hombros adelantados y cose costados."
+              : hasRaglan
+                ? "1. Cierra primero las pinzas de busto y pinzas de entalle si aplican (sin unir hombros tradicionales)."
+                : isSemicircular
+                  ? "1. Une costados y centro espalda instalando cierre invisible (margen 2 cm). Coloca la pretina con entretela y deja colgar la falda 24 h al bies antes de emparejar el ruedo."
+                  : "1. Cose primero las pinzas de busto (hacia abajo) y pinzas de cintura (hacia el centro); luego une hombros y costados haciendo coincidir piquetes (1 delantero, 2 espalda).",
+      hasRaglan
+        ? `2. Si es tela plana, cierra la pinza superior de hombro de la Manga Raglán; luego cose los raglán delanteros (1 piquete) y traseros (2 piquetes) al cuerpo${pieceIds.has("shirt_cuff") ? ", arma puños con entretela" : ""} y cierra manga + costado en una costura continua.`
+        : hasTwoPieceSleeve
+          ? "2. Arma la manga sastre uniendo Hoja Superior e Inferior por codo y costura interna, pasa embebido en copa y pega haciendo coincidir piquetes 1 del. / 2 esp."
+          : pieceIds.has("sleeve")
+            ? `2. Pasa doble pespunte de embebido en la copa de la manga${pieceIds.has("shirt_cuff") ? ", arma la portañuela y pega el puño con entretela" : ""} y encaja piquetes (1 delantero, 2 espalda).`
+            : hasShirtCollar
+              ? "2. Fusiona entretela en Pie de Cuello y Cuello Superior, ármalos y únelos al escote haciendo coincidir piquetes de hombro y centro."
+              : "2. Fusiona entretela en las vistas anatómicas de escote o pretina, une por hombros y asienta con pespunte invisible.",
       pieceIds.has("pocket_bag") || pieceIds.has("pocket_flap")
         ? "3. Instala los bolsillos siguiendo los piquetes laterales y realiza la prueba de ajuste antes de cerrar el ruedo (3 cm)."
         : "3. Realiza la prueba de ajuste, cose las aberturas traseras o portañuelas si aplica y asienta los ruedos con plancha.",

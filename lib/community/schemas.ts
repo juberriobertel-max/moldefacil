@@ -18,6 +18,7 @@ export const CLAVES_MEDIDAS_PROHIBIDAS = [
   "inseam",
   "hemWidth",
   "headCircumference",
+  "highBust",
   "measurements",
   "medidas",
   "busto",
@@ -86,6 +87,8 @@ export const GarmentExtrasSchema = z.strictObject({
   hemRuffle: z.boolean(),
   sidePockets: z.boolean(),
   flapPockets: z.boolean(),
+  princessSeam: z.boolean().optional(),
+  backYoke: z.boolean().optional(),
 });
 
 export const AparienciaMoldePublico3DSchema = z.strictObject({
@@ -143,7 +146,7 @@ export const ConfigMoldeSerializadoSchema = z
       "tailored_lapel",
       "shirt_collar",
     ]),
-    sleeveStyle: z.enum(["sleeveless", "short", "long", "kimono"]),
+    sleeveStyle: z.enum(["sleeveless", "short", "long", "kimono", "raglan"]),
     torsoFit: z.enum(["fitted", "loose"]),
     seamAllowance: z.union([z.literal(0), z.literal(1), z.literal(1.5)]),
     fabricType: z.enum(["woven", "stretch"]),
