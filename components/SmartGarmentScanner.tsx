@@ -37,8 +37,10 @@ import {
   DetectedAttributeKey,
   DetectedGarmentConfig,
   detectFashionStyleInBrowser,
+  extraerVectorCorreccionEnNavegador,
   warmUpBrowserDetector,
 } from "@/lib/browserStyleDetector";
+import type { AtributoVision } from "@/lib/vision/visionAttributes";
 import { extraerColorDominantePrenda } from "@/lib/vision/colorExtractor";
 import { preprocesarImagenPrenda } from "@/lib/vision/imagePreprocessor";
 import { calcularPinesAutomaticosPorCategoria } from "@/lib/vision/pinAutoPlacer";
@@ -411,6 +413,12 @@ function SleeveIcon({ style }: { style: SleeveStyle }) {
       {style === "kimono" && (
         <path d="M14 6 L26 6 L37 14 L35 22 C30 21, 27 21, 26 28 L14 28 C13 21, 10 21, 5 22 L3 14 Z" />
       )}
+      {style === "raglan" && (
+        <>
+          <path d="M14 6 L26 6 L37 22 L32 25 L26 16 L26 28 L14 28 L14 16 L8 25 L3 22 Z" />
+          <path d="M14 6 L14 16 M26 6 L26 16" strokeDasharray="2 2" />
+        </>
+      )}
     </svg>
   );
 }
@@ -490,6 +498,10 @@ export default function SmartGarmentScanner({
     GarmentCategory,
     TracingPins
   > | null>(null);
+  const [shareAnonymousFeedback, setShareAnonymousFeedback] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
 
   const innerFrameRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -512,6 +524,7 @@ export default function SmartGarmentScanner({
   const runStyleDetection = async (dataUrl: string) => {
     const seq = ++analysisSeqRef.current;
     setAutoPinsMap(null);
+    setFeedbackStatus("idle");
     setDetectionState({
       status: "analyzing",
       progress: 4,
@@ -701,6 +714,10 @@ export default function SmartGarmentScanner({
         colorDominante,
         esPrendaValida: true,
         reglasAplicadas: [],
+        explicacionSugerencia: `Sugerido: ${sampleLabelMap[kind]} (vista previa de ejemplo).`,
+        dudaEstiloPrincipal: false,
+        opcionesEstiloPrincipal: [],
+        referenciaUsada: false,
         modelId: "preset+colorExtractor",
         backend: "wasm",
         cropTrimmedBars: false,
@@ -718,6 +735,12 @@ export default function SmartGarmentScanner({
     optionLabel: string
   ) => {
     if (detectionState.status !== "detected") return;
+    const prevAttr = detectionState.result.atributosConConfianza.find(
+      (a) => a.key === key
+    );
+    const wasSample = Boolean(detectionState.isSample);
+    const activeModelId = detectionState.result.modelId;
+
     const updated = aplicarCorreccionUnToque(
       detectionState.result,
       key,
@@ -734,6 +757,42 @@ export default function SmartGarmentScanner({
       isSample: detectionState.isSample,
     });
     onApplyDetectedAttributes(synced.config);
+
+    if (shareAnonymousFeedback && !wasSample && prevAttr) {
+      const attrVision: AtributoVision =
+        key === "hemRuffle" ? "ruffle" : (key as AtributoVision);
+      void (async () => {
+        setFeedbackStatus("sending");
+        try {
+          const vecData = await extraerVectorCorreccionEnNavegador(
+            attrVision,
+            activeModelId
+          );
+          if (!vecData) {
+            setFeedbackStatus("idle");
+            return;
+          }
+          const resp = await fetch("/api/vision/feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              modelId: vecData.modelId,
+              attribute: attrVision,
+              cropKey: vecData.cropKey,
+              predictedLabel: prevAttr.selectedId,
+              correctedLabel: optionId,
+              predictedConfidence: prevAttr.confidence,
+              dim: vecData.dim,
+              vectorInt8B64: vecData.vectorInt8B64,
+              consentAccepted: true,
+            }),
+          });
+          setFeedbackStatus(resp.ok ? "sent" : "error");
+        } catch {
+          setFeedbackStatus("error");
+        }
+      })();
+    }
   };
 
   const handleFile = (file: File) => {
@@ -951,6 +1010,7 @@ export default function SmartGarmentScanner({
               onClick={() => {
                 analysisSeqRef.current += 1;
                 setAutoPinsMap(null);
+                setFeedbackStatus("idle");
                 setDetectionState({ status: "idle" });
                 setImageSrc(null);
                 setRawUploadSrc(null);
@@ -1105,10 +1165,22 @@ export default function SmartGarmentScanner({
                 <div className="flex items-start justify-between gap-2 text-xs sm:text-sm text-slate-800 font-semibold leading-snug">
                   <div className="flex items-start gap-2">
                     <Sparkles className="w-4 h-4 text-[#3B7A57] shrink-0 mt-0.5" />
-                    <div>
-                      <span>
-                        Detección visual lista en molde 2D y probador 3D
-                      </span>
+                    <div className="space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span>
+                          Detección visual lista en molde 2D y probador 3D
+                        </span>
+                        {detectionState.result.referenciaUsada && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-teal-50 border border-teal-200 text-[10px] font-bold text-teal-800">
+                            Biblioteca visual
+                          </span>
+                        )}
+                      </div>
+                      {detectionState.result.explicacionSugerencia && (
+                        <p className="text-xs font-medium text-slate-600">
+                          {detectionState.result.explicacionSugerencia}
+                        </p>
+                      )}
                       {detectionState.result.cropTrimmedBars && (
                         <p className="text-[11px] font-medium text-[#3B7A57]">
                           Bordes de captura recortados automáticamente
@@ -1126,6 +1198,50 @@ export default function SmartGarmentScanner({
                     </button>
                   )}
                 </div>
+
+                {/* Duda honesta de estilo completo (Top-3) cuando no hay seguridad suficiente */}
+                {detectionState.result.dudaEstiloPrincipal &&
+                  detectionState.result.opcionesEstiloPrincipal.length >= 2 && (
+                    <div
+                      data-testid="style-uncertainty-card"
+                      className="rounded-xl bg-amber-50/90 border border-amber-300 px-3 py-2.5 space-y-2"
+                    >
+                      <p className="text-xs font-bold text-amber-950">
+                        No estoy segura del estilo exacto — elige entre las 3 mejores opciones:
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {detectionState.result.opcionesEstiloPrincipal
+                          .slice(0, 3)
+                          .map((opt) => {
+                            const catActual =
+                              detectionState.result.atributosConConfianza.find(
+                                (a) => a.key === "category"
+                              )?.selectedId;
+                            const isActive = catActual === opt.id;
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() =>
+                                  handleOneTapCorrection(
+                                    "category",
+                                    opt.id,
+                                    opt.label
+                                  )
+                                }
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                                  isActive
+                                    ? "bg-[#3B7A57] text-white border-[#3B7A57]"
+                                    : "bg-white text-slate-800 border-amber-300 hover:border-amber-500"
+                                }`}
+                              >
+                                {opt.label} ({Math.round(opt.confidence * 100)}%)
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
 
                 {/* Color dominante extraído automáticamente */}
                 <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-white border border-slate-200">
@@ -1175,9 +1291,11 @@ export default function SmartGarmentScanner({
                     ))}
                 </div>
 
-                {/* Chips interactivos de 1 toque para atributos con confianza media (< 60%) */}
+                {/* Chips interactivos de 1 toque (hasta 3 opciones) para atributos con confianza media (< 60%) */}
                 {detectionState.result.atributosConConfianza.some(
-                  (attr) => !attr.esAltaConfianza && attr.top2Opciones
+                  (attr) =>
+                    !attr.esAltaConfianza &&
+                    (attr.top3Opciones ?? attr.top2Opciones)
                 ) && (
                   <div className="space-y-2 pt-1 border-t border-slate-200/80">
                     <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">
@@ -1186,46 +1304,93 @@ export default function SmartGarmentScanner({
                     <div className="space-y-1.5">
                       {detectionState.result.atributosConConfianza
                         .filter(
-                          (attr) => !attr.esAltaConfianza && attr.top2Opciones
+                          (attr) =>
+                            !attr.esAltaConfianza &&
+                            (attr.top3Opciones ?? attr.top2Opciones)
                         )
-                        .map((attr) => (
-                          <div
-                            key={attr.key}
-                            data-testid={`one-tap-chip-${attr.key}`}
-                            className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-amber-50/80 border border-amber-200"
-                          >
-                            <span className="text-xs font-bold text-amber-950">
-                              {attr.titleEs}: ¿Cuál se acerca más?
-                            </span>
-                            <div className="flex items-center gap-1.5">
-                              {attr.top2Opciones!.map((opt) => {
-                                const isActive = attr.selectedId === opt.id;
-                                return (
-                                  <button
-                                    key={opt.id}
-                                    type="button"
-                                    onClick={() =>
-                                      handleOneTapCorrection(
-                                        attr.key,
-                                        opt.id,
-                                        opt.label
-                                      )
-                                    }
-                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
-                                      isActive
-                                        ? "bg-[#3B7A57] text-white border-[#3B7A57]"
-                                        : "bg-white text-slate-700 border-slate-300 hover:border-amber-500"
-                                    }`}
-                                  >
-                                    {opt.label} ({Math.round(opt.confidence * 100)}
-                                    %)
-                                  </button>
-                                );
-                              })}
+                        .map((attr) => {
+                          const opciones =
+                            attr.top3Opciones ?? attr.top2Opciones ?? [];
+                          return (
+                            <div
+                              key={attr.key}
+                              data-testid={`one-tap-chip-${attr.key}`}
+                              className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-amber-50/80 border border-amber-200"
+                            >
+                              <div className="space-y-0.5">
+                                <span className="text-xs font-bold text-amber-950 block">
+                                  {attr.titleEs}: ¿Cuál se acerca más?
+                                </span>
+                                {attr.sinCoincidenciaReferencia && (
+                                  <span className="text-[10px] font-medium text-amber-800 block">
+                                    Sin parecido claro en referencia
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {opciones.slice(0, 3).map((opt) => {
+                                  const isActive = attr.selectedId === opt.id;
+                                  return (
+                                    <button
+                                      key={opt.id}
+                                      type="button"
+                                      onClick={() =>
+                                        handleOneTapCorrection(
+                                          attr.key,
+                                          opt.id,
+                                          opt.label
+                                        )
+                                      }
+                                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                                        isActive
+                                          ? "bg-[#3B7A57] text-white border-[#3B7A57]"
+                                          : "bg-white text-slate-700 border-slate-300 hover:border-amber-500"
+                                      }`}
+                                    >
+                                      {opt.label} ({Math.round(opt.confidence * 100)}
+                                      %)
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                     </div>
+                  </div>
+                )}
+
+                {/* Consentimiento opcional (opt-in) para mejorar con correcciones anónimas sin guardar foto */}
+                {!detectionState.isSample && (
+                  <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                    <label className="flex items-start gap-2 text-[11px] text-slate-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={shareAnonymousFeedback}
+                        onChange={(e) =>
+                          setShareAnonymousFeedback(e.target.checked)
+                        }
+                        className="mt-0.5 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                      />
+                      <span>
+                        Ayudar a mejorar el detector enviando solo la huella numérica al corregir (<strong>nunca tu foto</strong>).
+                      </span>
+                    </label>
+                    {feedbackStatus === "sending" && (
+                      <p className="text-[11px] font-medium text-slate-500">
+                        Guardando huella anónima...
+                      </p>
+                    )}
+                    {feedbackStatus === "sent" && (
+                      <p className="text-[11px] font-semibold text-teal-700">
+                        ✓ Corrección anónima guardada para revisión (sin foto)
+                      </p>
+                    )}
+                    {feedbackStatus === "error" && (
+                      <p className="text-[11px] font-medium text-amber-700">
+                        No se pudo enviar la corrección anónima en este momento.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1521,6 +1686,7 @@ export default function SmartGarmentScanner({
                     { id: "short", label: "Manga corta" },
                     { id: "long", label: "Manga larga" },
                     { id: "kimono", label: "Kimono / Murciélago" },
+                    { id: "raglan", label: "Manga Raglán" },
                   ] as const
                 ).map((sl) => (
                   <button
