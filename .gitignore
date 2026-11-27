@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# vision reference & eval images (keep manifests and README)
+/data/vision/reference/images/*
+!/data/vision/reference/images/.gitkeep
+/data/vision/eval/images/*
+!/data/vision/eval/images/.gitkeep
+/data/vision/reports/
+/data/vision/feedback-queue.jsonl

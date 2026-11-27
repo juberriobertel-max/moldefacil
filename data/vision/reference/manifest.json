@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "ref-00",
+      "file": "images/seed-ai/ref-00-wrap-kimono.jpg",
+      "labels": {
+        "category": "vestido",
+        "neckline": "wrap",
+        "sleeve": "kimono",
+        "length": "short"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: vestido corto cruzado terracota con manga kimono"
+    },
+    {
+      "id": "ref-01",
+      "file": "images/seed-ai/ref-01-v_neck-farol.jpg",
+      "labels": {
+        "category": "blusa",
+        "neckline": "v_neck",
+        "sleeve": "farol"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: blusa azul marino escote V con manga farol"
+    },
+    {
+      "id": "ref-02",
+      "file": "images/seed-ai/ref-02-round-acampanada.jpg",
+      "labels": {
+        "category": "vestido",
+        "neckline": "round",
+        "sleeve": "acampanada",
+        "length": "short"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: vestido corto verde salvia escote redondo manga acampanada"
+    },
+    {
+      "id": "ref-03",
+      "file": "images/seed-ai/ref-03-square-short.jpg",
+      "labels": {
+        "category": "blusa",
+        "neckline": "square",
+        "sleeve": "short"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: blusa negra escote cuadrado manga corta"
+    },
+    {
+      "id": "ref-04",
+      "file": "images/seed-ai/ref-04-tailored_lapel-long.jpg",
+      "labels": {
+        "category": "chaqueta",
+        "neckline": "tailored_lapel",
+        "sleeve": "long"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: chaqueta blanco crudo solapa sastre manga larga"
+    },
+    {
+      "id": "ref-05",
+      "file": "images/seed-ai/ref-05-shirt_collar-sleeveless.jpg",
+      "labels": {
+        "category": "blusa",
+        "neckline": "shirt_collar",
+        "sleeve": "sleeveless"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: blusa camisera mostaza sin mangas"
+    },
+    {
+      "id": "ref-06",
+      "file": "images/seed-ai/ref-06-high-kimono.jpg",
+      "labels": {
+        "category": "vestido",
+        "neckline": "high",
+        "sleeve": "kimono",
+        "length": "short"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: vestido corto rosa palo cuello alto manga kimono"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "eval-00",
+      "file": "images/smoke-ai/eval-00-wrap-acampanada.jpg",
+      "labels": {
+        "category": "vestido",
+        "neckline": "wrap",
+        "sleeve": "acampanada",
+        "length": "midi"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: vestido midi mostaza cruzado manga acampanada en taller"
+    },
+    {
+      "id": "eval-01",
+      "file": "images/smoke-ai/eval-01-v_neck-short.jpg",
+      "labels": {
+        "category": "blusa",
+        "neckline": "v_neck",
+        "sleeve": "short"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: blusa rosa palo escote V manga corta"
+    },
+    {
+      "id": "eval-02",
+      "file": "images/smoke-ai/eval-02-round-long.jpg",
+      "labels": {
+        "category": "vestido",
+        "neckline": "round",
+        "sleeve": "long",
+        "length": "midi"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: vestido midi vino escote redondo manga larga"
+    },
+    {
+      "id": "eval-03",
+      "file": "images/smoke-ai/eval-03-square-sleeveless.jpg",
+      "labels": {
+        "category": "blusa",
+        "neckline": "square",
+        "sleeve": "sleeveless"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: blusa gris escote cuadrado sin mangas"
+    },
+    {
+      "id": "eval-04",
+      "file": "images/smoke-ai/eval-04-tailored_lapel-kimono.jpg",
+      "labels": {
+        "category": "chaqueta",
+        "neckline": "tailored_lapel",
+        "sleeve": "kimono"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: chaqueta celeste solapa sastre manga kimono"
+    },
+    {
+      "id": "eval-05",
+      "file": "images/smoke-ai/eval-05-shirt_collar-farol.jpg",
+      "labels": {
+        "category": "vestido",
+        "neckline": "shirt_collar",
+        "sleeve": "farol",
+        "length": "midi"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: vestido camisero midi terracota manga farol"
+    },
+    {
+      "id": "eval-06",
+      "file": "images/smoke-ai/eval-06-high-acampanada.jpg",
+      "labels": {
+        "category": "vestido",
+        "neckline": "high",
+        "sleeve": "acampanada",
+        "length": "midi"
+      },
+      "source": "ai_generated",
+      "license": "generado por MoldeFácil (IA), uso interno",
+      "notes": "Set de humo IA: vestido midi azul marino cuello alto manga acampanada"
+    }
+  ]
+}

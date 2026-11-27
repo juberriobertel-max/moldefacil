@@ -1,15 +1,18 @@
 import {
   CropRawInput,
   ejecutarInferenciaEnCascada,
+  extraerVectorDeRecorte,
   obtenerMotorVision,
 } from "../lib/vision/cascadeRunner";
 import type { VisionCropKey } from "../lib/vision/imagePreprocessor";
 import type { RawVisionEvaluation } from "../lib/vision/tailoringRules";
 
 export interface WorkerRequestMessage {
-  type: "warmup" | "classify";
+  type: "warmup" | "classify" | "embed_crop";
   requestId: number;
   crops?: Record<VisionCropKey, CropRawInput>;
+  crop?: CropRawInput;
+  modelId?: string;
 }
 
 export type WorkerResponseMessage =
@@ -24,12 +27,17 @@ export type WorkerResponseMessage =
       type: "warmup_done";
       requestId: number;
       modelId: string;
-      backend: "webgpu" | "wasm";
+      backend: "webgpu" | "wasm" | "cpu";
     }
   | {
       type: "result";
       requestId: number;
       payload: Omit<RawVisionEvaluation, "colorDominante" | "cropTrimmedBars">;
+    }
+  | {
+      type: "embed_crop_result";
+      requestId: number;
+      payload: { modelId: string; dim: number; vectorInt8B64: string };
     }
   | {
       type: "error";
@@ -88,6 +96,16 @@ workerScope.addEventListener(
         );
         workerScope.postMessage({
           type: "result",
+          requestId: msg.requestId,
+          payload,
+        });
+        return;
+      }
+
+      if (msg.type === "embed_crop" && msg.crop) {
+        const payload = await extraerVectorDeRecorte(msg.crop, msg.modelId);
+        workerScope.postMessage({
+          type: "embed_crop_result",
           requestId: msg.requestId,
           payload,
         });

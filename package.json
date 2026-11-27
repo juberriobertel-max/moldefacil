@@ -7,7 +7,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "vision:ref": "npx tsx scripts/vision-build-reference.ts",
+    "vision:eval": "npx tsx scripts/vision-eval.ts",
+    "vision:feedback": "npx tsx scripts/vision-feedback-merge.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.2",
