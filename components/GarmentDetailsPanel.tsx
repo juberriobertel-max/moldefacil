@@ -47,6 +47,16 @@ const EXTRA_CARDS: ExtraCardDef[] = [
     title: "Bolsillos con Solapa",
     desc: "+ Tapetas y bolsas sastre",
   },
+  {
+    key: "princessSeam",
+    title: "Corte Princesa desde Sisa",
+    desc: "+ Centro y costadillo moldeado",
+  },
+  {
+    key: "backYoke",
+    title: "Canesú Trasero Camisero",
+    desc: "+ Hombro adelantado y tabla central",
+  },
 ];
 
 function ExtraIcon({ type }: { type: keyof GarmentExtras }) {
@@ -92,6 +102,22 @@ function ExtraIcon({ type }: { type: keyof GarmentExtras }) {
         <svg viewBox="0 0 36 36" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
           <path d="M7 10 L29 10 L29 16 L26.5 18 L9.5 18 L7 16 Z" />
           <path d="M9 18 L9 29 L27 29 L27 18" />
+        </svg>
+      );
+    case "princessSeam":
+      return (
+        <svg viewBox="0 0 36 36" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+          <path d="M10 6 L26 6 L29 13 L27 16 L28 30 L8 30 L9 16 L7 13 Z" />
+          <path d="M9 13 C13 16, 13.5 22, 13 30" strokeDasharray="2.5 2" />
+          <path d="M27 13 C23 16, 22.5 22, 23 30" strokeDasharray="2.5 2" />
+        </svg>
+      );
+    case "backYoke":
+      return (
+        <svg viewBox="0 0 36 36" className="w-8 h-8 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinejoin="round">
+          <path d="M12 6 C16 8, 20 8, 24 6 L29 10 L27 15 L27 30 L9 30 L9 15 L7 10 Z" />
+          <line x1="8.5" y1="13" x2="27.5" y2="13" />
+          <line x1="18" y1="13" x2="18" y2="28" strokeDasharray="2 2" />
         </svg>
       );
   }
@@ -273,6 +299,9 @@ export function GarmentExtrasSelector({
   const isAvailable = (key: keyof GarmentExtras): boolean => {
     if (key === "wrapFront" || key === "flaredSleeve") {
       return category === "dress" || category === "top" || category === "two_piece";
+    }
+    if (key === "princessSeam" || key === "backYoke") {
+      return category === "dress" || category === "top";
     }
     if (key === "hemRuffle") {
       return category !== "pants";
