@@ -23,6 +23,7 @@ export interface RankedPromptCandidate<T extends string = string> {
 export interface EvaluatedPromptGroup<T extends string = string> {
   top1: RankedPromptCandidate<T>;
   top2: RankedPromptCandidate<T> | null;
+  top3: RankedPromptCandidate<T>[];
   all: RankedPromptCandidate<T>[];
   esAltaConfianza: boolean;
 }
@@ -565,10 +566,12 @@ export function evaluarGrupoPrompts<T extends string>(
 
   const top1 = all[0];
   const top2 = all[1] ?? null;
+  const top3 = all.slice(0, 3);
 
   return {
     top1,
     top2,
+    top3,
     all,
     esAltaConfianza: top1.confidence >= HIGH_CONFIDENCE_THRESHOLD,
   };

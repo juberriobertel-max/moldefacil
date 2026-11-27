@@ -22,6 +22,8 @@ import {
 } from "../types";
 import type { TipoEstampado, TipoTela } from "../3d/types";
 import type { DominantColorResult } from "./colorExtractor";
+import { UMBRAL_SIN_COINCIDENCIA } from "./referenceMatcher";
+import type { AtributoVision } from "./visionAttributes";
 import {
   CategoryPromptId,
   EvaluatedPromptGroup,
@@ -91,7 +93,9 @@ export interface DetectedAttributeItem {
   confidence: number;
   esAltaConfianza: boolean;
   reglaAplicada?: string;
+  sinCoincidenciaReferencia?: boolean;
   top2Opciones: [DetectedAttributeCandidate, DetectedAttributeCandidate] | null;
+  top3Opciones?: DetectedAttributeCandidate[] | null;
 }
 
 export interface DetectedAttributeScores {
@@ -105,7 +109,7 @@ export interface DetectedAttributeScores {
 
 export interface RawVisionEvaluation {
   modelId: string;
-  backend: "webgpu" | "wasm";
+  backend: "webgpu" | "wasm" | "cpu";
   cropTrimmedBars: boolean;
   validity: EvaluatedPromptGroup<ValidityPromptId>;
   category: EvaluatedPromptGroup<CategoryPromptId>;
@@ -121,6 +125,8 @@ export interface RawVisionEvaluation {
   print: EvaluatedPromptGroup<TipoEstampado>;
   colorDominante: DominantColorResult;
   autoPinsByCategory?: Record<GarmentCategory, TracingPins>;
+  referenciaUsada?: boolean;
+  similitudReferenciaPorAtributo?: Partial<Record<AtributoVision, number>>;
 }
 
 export interface TailoredVisionOutput {
@@ -131,8 +137,12 @@ export interface TailoredVisionOutput {
   esPrendaValida: boolean;
   avisoBajaValidez?: string;
   reglasAplicadas: string[];
+  explicacionSugerencia: string;
+  dudaEstiloPrincipal: boolean;
+  opcionesEstiloPrincipal: DetectedAttributeCandidate[];
+  referenciaUsada?: boolean;
   modelId: string;
-  backend: "webgpu" | "wasm";
+  backend: "webgpu" | "wasm" | "cpu";
   cropTrimmedBars: boolean;
   autoPinsByCategory?: Record<GarmentCategory, TracingPins>;
 }
@@ -155,27 +165,91 @@ function top2DesdeGrupo<T extends string>(
   ];
 }
 
+function top3DesdeGrupo<T extends string>(
+  grupo: EvaluatedPromptGroup<T>
+): DetectedAttributeCandidate[] | null {
+  if (grupo.all.length < 2) return null;
+  const slice = (grupo.top3 && grupo.top3.length >= 2
+    ? grupo.top3
+    : grupo.all.slice(0, 3)
+  ).map((c) => ({
+    id: c.id,
+    label: c.labelEs,
+    confidence: c.confidence,
+  }));
+  return slice;
+}
+
 function buildAttributeItem<T extends string>(
   key: DetectedAttributeKey,
   titleEs: string,
   grupo: EvaluatedPromptGroup<T>,
   overrideId?: string,
   overrideLabel?: string,
-  reglaAplicada?: string
+  reglaAplicada?: string,
+  knnMaxSim?: number
 ): DetectedAttributeItem {
   const chosenId = overrideId ?? grupo.top1.id;
   const matched = grupo.all.find((x) => x.id === chosenId) ?? grupo.top1;
   const conf = matched.confidence;
+  const sinCoincidenciaReferencia =
+    typeof knnMaxSim === "number" && knnMaxSim < UMBRAL_SIN_COINCIDENCIA;
   return {
     key,
     titleEs,
     selectedId: chosenId,
     selectedLabel: overrideLabel ?? matched.labelEs,
     confidence: conf,
-    esAltaConfianza: reglaAplicada ? true : conf >= HIGH_CONFIDENCE_THRESHOLD,
+    esAltaConfianza: reglaAplicada
+      ? true
+      : conf >= HIGH_CONFIDENCE_THRESHOLD && !sinCoincidenciaReferencia,
     reglaAplicada,
+    sinCoincidenciaReferencia,
     top2Opciones: top2DesdeGrupo(grupo),
+    top3Opciones: top3DesdeGrupo(grupo),
   };
+}
+
+function construirExplicacionSugerencia(params: {
+  estiloLabel: string;
+  atributos: DetectedAttributeItem[];
+  dudaEstiloPrincipal: boolean;
+  opcionesEstiloPrincipal: DetectedAttributeCandidate[];
+  reglasAplicadas: string[];
+}): string {
+  if (
+    params.dudaEstiloPrincipal &&
+    params.opcionesEstiloPrincipal.length >= 2
+  ) {
+    const nombres = params.opcionesEstiloPrincipal
+      .slice(0, 3)
+      .map((o) => o.label)
+      .join(", ");
+    return `No estoy completamente segura entre ${nombres}; elige la opción que mejor coincide antes de trazar.`;
+  }
+
+  const detalles = params.atributos
+    .filter(
+      (a) =>
+        a.key === "neckline" ||
+        a.key === "sleeve" ||
+        a.key === "length" ||
+        a.key === "skirtCut" ||
+        a.key === "pantsCut" ||
+        a.key === "waistTie" ||
+        a.key === "hemRuffle"
+    )
+    .slice(0, 4)
+    .map((a) => a.selectedLabel.toLowerCase());
+
+  if (detalles.length === 0) {
+    return `Sugerido: ${params.estiloLabel} según la silueta general de tu foto.`;
+  }
+  const reglaExtra =
+    params.reglasAplicadas.length > 0
+      ? ` (${params.reglasAplicadas[0]})`
+      : "";
+  return `Sugerido: ${params.estiloLabel} porque detecté ${detalles.join(", ")}${reglaExtra}.`;
 }
 
 function mapCategoryAndSubStyles(
@@ -383,15 +457,38 @@ export function aplicarReglasCoherenciaModisteria(
           "Prenda",
           raw.category,
           "bucketHat",
-          "Sombrero Bucket Hat"
+          "Sombrero Bucket Hat",
+          undefined,
+          raw.similitudReferenciaPorAtributo?.category
         ),
-        buildAttributeItem("fabric", "Tela", raw.fabric),
-        buildAttributeItem("print", "Estampado", raw.print),
+        buildAttributeItem(
+          "fabric",
+          "Tela",
+          raw.fabric,
+          undefined,
+          undefined,
+          undefined,
+          raw.similitudReferenciaPorAtributo?.fabric
+        ),
+        buildAttributeItem(
+          "print",
+          "Estampado",
+          raw.print,
+          undefined,
+          undefined,
+          undefined,
+          raw.similitudReferenciaPorAtributo?.print
+        ),
       ],
       colorDominante: raw.colorDominante,
       esPrendaValida,
       avisoBajaValidez,
       reglasAplicadas,
+      explicacionSugerencia:
+        "Sugerido: Sombrero Bucket Hat según la silueta de accesorio detectada.",
+      dudaEstiloPrincipal: false,
+      opcionesEstiloPrincipal: top3DesdeGrupo(raw.category) ?? [],
+      referenciaUsada: raw.referenciaUsada,
       modelId: raw.modelId,
       backend: raw.backend,
       cropTrimmedBars: raw.cropTrimmedBars,
@@ -498,25 +595,43 @@ export function aplicarReglasCoherenciaModisteria(
     autoPins: resolvedAutoPins,
   };
 
-  const atributosConConfianza: DetectedAttributeItem[] = [
-    buildAttributeItem(
-      "category",
-      "Prenda",
-      raw.category,
-      catFinalId,
-      raw.category.all.find((c) => c.id === catFinalId)?.labelEs,
-      reglaCategoria
-    ),
-  ];
+  const simMap = raw.similitudReferenciaPorAtributo;
+  const catItem = buildAttributeItem(
+    "category",
+    "Prenda",
+    raw.category,
+    catFinalId,
+    raw.category.all.find((c) => c.id === catFinalId)?.labelEs,
+    reglaCategoria,
+    simMap?.category
+  );
+
+  const atributosConConfianza: DetectedAttributeItem[] = [catItem];
 
   if (!esSoloInferior && raw.neckline) {
     atributosConConfianza.push(
-      buildAttributeItem("neckline", "Escote / Cuello", raw.neckline)
+      buildAttributeItem(
+        "neckline",
+        "Escote / Cuello",
+        raw.neckline,
+        undefined,
+        undefined,
+        undefined,
+        simMap?.neckline
+      )
     );
   }
   if (!esSoloInferior && raw.sleeves) {
     atributosConConfianza.push(
-      buildAttributeItem("sleeve", "Mangas", raw.sleeves)
+      buildAttributeItem(
+        "sleeve",
+        "Mangas",
+        raw.sleeves,
+        undefined,
+        undefined,
+        undefined,
+        simMap?.sleeve
+      )
     );
   }
   if (!esSoloInferior) {
@@ -527,40 +642,112 @@ export function aplicarReglasCoherenciaModisteria(
         raw.fit,
         torsoFit,
         torsoFit === "loose" ? "Torso Holgado" : "Torso Entallado",
-        reglaFit
+        reglaFit,
+        simMap?.fit
       )
     );
   }
   if ((catFinalId === "falda" || catFinalId === "vestido") && raw.skirtCut) {
     atributosConConfianza.push(
-      buildAttributeItem("skirtCut", "Vuelo / Falda", raw.skirtCut)
+      buildAttributeItem(
+        "skirtCut",
+        "Vuelo / Falda",
+        raw.skirtCut,
+        undefined,
+        undefined,
+        undefined,
+        simMap?.skirtCut
+      )
     );
   }
   if (catFinalId === "pantalon" && raw.pantsCut) {
     atributosConConfianza.push(
-      buildAttributeItem("pantsCut", "Corte Pantalón", raw.pantsCut)
+      buildAttributeItem(
+        "pantsCut",
+        "Corte Pantalón",
+        raw.pantsCut,
+        undefined,
+        undefined,
+        undefined,
+        simMap?.pantsCut
+      )
     );
   }
   if (raw.length && (catFinalId === "vestido" || catFinalId === "falda")) {
     atributosConConfianza.push(
-      buildAttributeItem("length", "Largo", raw.length)
+      buildAttributeItem(
+        "length",
+        "Largo",
+        raw.length,
+        undefined,
+        undefined,
+        undefined,
+        simMap?.length
+      )
     );
   }
   if (raw.waistTie && waistTie) {
     atributosConConfianza.push(
-      buildAttributeItem("waistTie", "Cintura", raw.waistTie, "with_belt")
+      buildAttributeItem(
+        "waistTie",
+        "Cintura",
+        raw.waistTie,
+        "with_belt",
+        undefined,
+        undefined,
+        simMap?.waistTie
+      )
     );
   }
   if (raw.ruffle && hemRuffle) {
     atributosConConfianza.push(
-      buildAttributeItem("hemRuffle", "Ruedo", raw.ruffle, "with_ruffle")
+      buildAttributeItem(
+        "hemRuffle",
+        "Ruedo",
+        raw.ruffle,
+        "with_ruffle",
+        undefined,
+        undefined,
+        simMap?.ruffle
+      )
     );
   }
 
-  atributosConConfianza.push(buildAttributeItem("fabric", "Tela", raw.fabric));
   atributosConConfianza.push(
-    buildAttributeItem("print", "Estampado", raw.print)
+    buildAttributeItem(
+      "fabric",
+      "Tela",
+      raw.fabric,
+      undefined,
+      undefined,
+      undefined,
+      simMap?.fabric
+    )
   );
+  atributosConConfianza.push(
+    buildAttributeItem(
+      "print",
+      "Estampado",
+      raw.print,
+      undefined,
+      undefined,
+      undefined,
+      simMap?.print
+    )
+  );
+
+  const catTop1Score = raw.category.top1.confidence;
+  const catTop2Score = raw.category.top2?.confidence ?? 0;
+  const dudaEstiloPrincipal =
+    !catItem.esAltaConfianza || catTop1Score - catTop2Score < 0.15;
+  const opcionesEstiloPrincipal = top3DesdeGrupo(raw.category) ?? [];
+  const explicacionSugerencia = construirExplicacionSugerencia({
+    estiloLabel: catItem.selectedLabel,
+    atributos: atributosConConfianza,
+    dudaEstiloPrincipal,
+    opcionesEstiloPrincipal,
+    reglasAplicadas,
+  });
 
   return {
     config,
@@ -588,6 +775,10 @@ export function aplicarReglasCoherenciaModisteria(
     esPrendaValida,
     avisoBajaValidez,
     reglasAplicadas,
+    explicacionSugerencia,
+    dudaEstiloPrincipal,
+    opcionesEstiloPrincipal,
+    referenciaUsada: raw.referenciaUsada,
     modelId: raw.modelId,
     backend: raw.backend,
     cropTrimmedBars: raw.cropTrimmedBars,
@@ -689,7 +880,8 @@ export function aplicarCorreccionUnToque(
 
   const nextAttrs = resultado.atributosConConfianza.map((item) => {
     if (item.key !== key) return item;
-    const opcionEncontrada = item.top2Opciones?.find(
+    const candidatos = item.top3Opciones ?? item.top2Opciones;
+    const opcionEncontrada = candidatos?.find(
       (opt) => opt.id === nuevaOpcionId
     );
     return {
@@ -699,8 +891,20 @@ export function aplicarCorreccionUnToque(
         nuevaEtiqueta ?? opcionEncontrada?.label ?? item.selectedLabel,
       confidence: 1,
       esAltaConfianza: true,
+      sinCoincidenciaReferencia: false,
       reglaAplicada: "Confirmado en 1 toque",
     };
+  });
+
+  const nextDudaEstilo =
+    key === "category" ? false : resultado.dudaEstiloPrincipal;
+  const catActual = nextAttrs.find((a) => a.key === "category");
+  const nextExplicacion = construirExplicacionSugerencia({
+    estiloLabel: catActual?.selectedLabel ?? "Prenda seleccionada",
+    atributos: nextAttrs,
+    dudaEstiloPrincipal: nextDudaEstilo,
+    opcionesEstiloPrincipal: resultado.opcionesEstiloPrincipal,
+    reglasAplicadas: resultado.reglasAplicadas,
   });
 
   if (key === "category" && resultado.autoPinsByCategory?.[nextConfig.category]) {
@@ -729,5 +933,7 @@ export function aplicarCorreccionUnToque(
     ...resultado,
     config: nextConfig,
     atributosConConfianza: nextAttrs,
+    dudaEstiloPrincipal: nextDudaEstilo,
+    explicacionSugerencia: nextExplicacion,
   };
 }

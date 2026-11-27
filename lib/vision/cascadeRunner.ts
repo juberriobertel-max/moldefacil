@@ -3,9 +3,11 @@ import {
   CATEGORY_PROMPT_GROUP,
   DEFAULT_HYPOTHESIS_TEMPLATE,
   evaluarGrupoPrompts,
+  type EvaluatedPromptGroup,
   FABRIC_PROMPT_GROUP,
   FALLBACK_VISION_MODEL,
   FIT_PROMPT_GROUP,
+  HIGH_CONFIDENCE_THRESHOLD,
   LENGTH_PROMPT_GROUP,
   NECKLINE_PROMPT_GROUP,
   obtenerEtiquetasGrupo,
@@ -19,8 +21,28 @@ import {
   VALIDITY_PROMPT_GROUP,
   WAIST_TIE_PROMPT_GROUP,
 } from "./garmentPrompts";
+import {
+  calcularEmbeddingImagen,
+  cargarEmbedderImagen,
+} from "./imageEmbedder";
 import type { VisionCropKey } from "./imagePreprocessor";
+import {
+  cuantizarVector,
+  decodificarCubetaReferencia,
+  type DecodedReferenceEntry,
+  mezclarProbabilidades,
+  type ReferenceAttributeBucket,
+  type ReferenceLibraryFile,
+  UMBRAL_SIN_COINCIDENCIA,
+  votarKnn,
+} from "./referenceMatcher";
 import type { RawVisionEvaluation } from "./tailoringRules";
+import {
+  ATRIBUTO_A_RECORTE,
+  ATRIBUTOS_VISION,
+  type AtributoVision,
+  IDS_VALIDOS,
+} from "./visionAttributes";
 
 export interface CropRawInput {
   width: number;
@@ -38,14 +60,132 @@ type ZeroShotRunner = (
 interface LoadedEngine {
   runner: ZeroShotRunner;
   modelId: string;
-  backend: "webgpu" | "wasm";
+  backend: "webgpu" | "wasm" | "cpu";
+}
+
+function esEntornoNode(): boolean {
+  return (
+    typeof process !== "undefined" &&
+    Boolean(process.versions?.node) &&
+    typeof self === "undefined" &&
+    typeof window === "undefined"
+  );
 }
 
 let cachedEnginePromise: Promise<LoadedEngine> | null = null;
+const cachedReferenceLibs = new Map<
+  string,
+  Promise<ReferenceLibraryFile | null>
+>();
+const cachedDecodedBuckets = new Map<string, DecodedReferenceEntry[]>();
 let lastLoadedMeta: { ready: boolean; failed: boolean } = {
   ready: false,
   failed: false,
 };
+
+function slugModeloReferencia(modelId: string): string {
+  const afterSlash = modelId.includes("/")
+    ? modelId.split("/").slice(1).join("-")
+    : modelId;
+  return afterSlash.replace(/[^a-zA-Z0-9._-]+/g, "-");
+}
+
+function esCubetaElegibleParaBlend(
+  bucket: ReferenceAttributeBucket | undefined,
+  attr: AtributoVision
+): boolean {
+  if (!bucket || bucket.entries.length === 0) return false;
+  if (process.env.NEXT_PUBLIC_VISION_REF_BLEND === "always") return true;
+  const distinctLabels = new Set(bucket.entries.map((e) => e.label)).size;
+  const totalIds = IDS_VALIDOS[attr].length;
+  return (
+    distinctLabels >= 2 &&
+    (bucket.entries.length >= totalIds * 2 ||
+      (distinctLabels >= Math.ceil(totalIds * 0.5) &&
+        bucket.entries.length >= 10))
+  );
+}
+
+async function cargarBibliotecaReferenciaNavegador(
+  modelId: string
+): Promise<ReferenceLibraryFile | null> {
+  if (esEntornoNode() || typeof fetch !== "function") return null;
+  const existente = cachedReferenceLibs.get(modelId);
+  if (existente) return existente;
+
+  const slug = slugModeloReferencia(modelId);
+  const rel = `/vision/reference/${slug}.json`;
+  const url =
+    typeof location !== "undefined" && location.origin
+      ? `${location.origin}${rel}`
+      : rel;
+
+  const promesa = fetch(url, { cache: "force-cache" })
+    .then(async (res) => {
+      if (!res.ok) return null;
+      const json = (await res.json()) as Partial<ReferenceLibraryFile>;
+      if (
+        json.version !== 1 ||
+        json.modelId !== modelId ||
+        !json.dim ||
+        !json.attributes
+      ) {
+        return null;
+      }
+      return json as ReferenceLibraryFile;
+    })
+    .catch(() => null);
+
+  cachedReferenceLibs.set(modelId, promesa);
+  return promesa;
+}
+
+function reconstruirGrupoConBlend<T extends string>(
+  grupo: EvaluatedPromptGroup<T>,
+  probsMezcladas: Record<string, number>,
+  knnMaxSim?: number
+): EvaluatedPromptGroup<T> {
+  const all = grupo.all
+    .map((cand) => ({
+      ...cand,
+      confidence: Number((probsMezcladas[cand.id] ?? cand.confidence).toFixed(4)),
+    }))
+    .sort((a, b) => b.confidence - a.confidence);
+  const top1 = all[0];
+  const top2 = all[1] ?? null;
+  const top3 = all.slice(0, 3);
+  const tieneSimilitud =
+    knnMaxSim === undefined || knnMaxSim >= UMBRAL_SIN_COINCIDENCIA;
+  return {
+    top1,
+    top2,
+    top3,
+    all,
+    esAltaConfianza:
+      top1.confidence >= HIGH_CONFIDENCE_THRESHOLD && tieneSimilitud,
+  };
+}
+
+/**
+ * Extrae el vector L2-normalizado cuantizado (`int8` base64) de un recorte de prenda,
+ * usado cuando la usuaria acepta enviar una corrección anónima (nunca la imagen).
+ */
+export async function extraerVectorDeRecorte(
+  crop: CropRawInput,
+  preferredModelId?: string
+): Promise<{ modelId: string; dim: number; vectorInt8B64: string }> {
+  const engine = await obtenerMotorVision();
+  const targetModel = preferredModelId?.includes("/")
+    ? preferredModelId
+    : engine.modelId;
+  const embedder = await cargarEmbedderImagen(targetModel, engine.backend);
+  const vec = await calcularEmbeddingImagen(embedder, toRawImageRgb(crop));
+  return {
+    modelId: targetModel,
+    dim: vec.length,
+    vectorInt8B64: cuantizarVector(vec),
+  };
+}
 
 export function getCascadeEngineStatus(): { ready: boolean; failed: boolean } {
   return { ...lastLoadedMeta };
@@ -67,7 +207,7 @@ async function detectarSoporteWebGPU(): Promise<boolean> {
 
 async function intentarCargarModelo(
   modelId: string,
-  device: "webgpu" | "wasm",
+  device: "webgpu" | "wasm" | "cpu",
   onProgress?: (percent: number, stepLabel: string, modelId?: string) => void
 ): Promise<LoadedEngine> {
   const clf = await pipeline("zero-shot-image-classification", modelId, {
@@ -101,12 +241,13 @@ export async function obtenerMotorVision(
 ): Promise<LoadedEngine> {
   if (!cachedEnginePromise) {
     cachedEnginePromise = (async () => {
+      const enNode = esEntornoNode();
       env.allowLocalModels = false;
       env.allowRemoteModels = true;
-      env.useBrowserCache = true;
+      env.useBrowserCache = !enNode;
       env.useWasmCache = true;
 
-      const soportaWebGpu = await detectarSoporteWebGPU();
+      const soportaWebGpu = enNode ? false : await detectarSoporteWebGPU();
       const modelos = [
         PRIMARY_VISION_MODEL,
         FALLBACK_VISION_MODEL,
@@ -115,9 +256,11 @@ export async function obtenerMotorVision(
 
       let ultimoError: unknown;
       for (const modelId of modelos) {
-        const dispositivos: Array<"webgpu" | "wasm"> = soportaWebGpu
-          ? ["webgpu", "wasm"]
-          : ["wasm"];
+        const dispositivos: Array<"webgpu" | "wasm" | "cpu"> = enNode
+          ? ["cpu"]
+          : soportaWebGpu
+            ? ["webgpu", "wasm"]
+            : ["wasm"];
 
         for (const device of dispositivos) {
           try {
@@ -162,7 +305,8 @@ function toRawImageRgb(crop: CropRawInput): RawImage {
  */
 export async function ejecutarInferenciaEnCascada(
   crops: Record<VisionCropKey, CropRawInput>,
-  onProgress?: (percent: number, stepLabel: string, modelId?: string) => void
+  onProgress?: (percent: number, stepLabel: string, modelId?: string) => void,
+  options?: { disableReferenceBlend?: boolean }
 ): Promise<Omit<RawVisionEvaluation, "colorDominante" | "cropTrimmedBars">> {
   onProgress?.(12, "Inicializando motor visual en caché...");
   const engine = await obtenerMotorVision(onProgress);
@@ -310,20 +454,136 @@ export async function ejecutarInferenciaEnCascada(
 
   onProgress?.(96, "Aplicando reglas de modistería...", modelId);
 
-  return {
-    modelId,
-    backend,
-    validity,
-    category,
-    neckline,
-    sleeves,
-    fit,
-    length,
-    skirtCut,
-    pantsCut,
-    waistTie,
-    ruffle,
-    fabric,
-    print,
-  };
+  const result: Omit<RawVisionEvaluation, "colorDominante" | "cropTrimmedBars"> =
+    {
+      modelId,
+      backend,
+      validity,
+      category,
+      neckline,
+      sleeves,
+      fit,
+      length,
+      skirtCut,
+      pantsCut,
+      waistTie,
+      ruffle,
+      fabric,
+      print,
+      referenciaUsada: false,
+    };
+
+  if (!options?.disableReferenceBlend) {
+    try {
+      const refLib = await cargarBibliotecaReferenciaNavegador(modelId);
+      if (refLib) {
+        const eligibleAttrs = ATRIBUTOS_VISION.filter((attr) =>
+          esCubetaElegibleParaBlend(refLib.attributes[attr], attr)
+        );
+        if (eligibleAttrs.length > 0) {
+          const embedder = await cargarEmbedderImagen(modelId, backend);
+          const cropVecCache = new Map<VisionCropKey, Float32Array>();
+          const similitudPorAttr: Partial<Record<AtributoVision, number>> = {};
+          let blendedAny = false;
+
+          const groupMap: Partial<
+            Record<AtributoVision, EvaluatedPromptGroup<string> | undefined>
+          > = {
+            category: result.category,
+            neckline: result.neckline,
+            sleeve: result.sleeves,
+            fit: result.fit,
+            length: result.length,
+            skirtCut: result.skirtCut,
+            pantsCut: result.pantsCut,
+            waistTie: result.waistTie,
+            ruffle: result.ruffle,
+            fabric: result.fabric,
+            print: result.print,
+          };
+
+          for (const attr of eligibleAttrs) {
+            const zsGroup = groupMap[attr];
+            const bucket = refLib.attributes[attr];
+            if (!zsGroup || !bucket) continue;
+
+            const cacheKey = `${modelId}::${attr}`;
+            let decoded = cachedDecodedBuckets.get(cacheKey);
+            if (!decoded) {
+              decoded = decodificarCubetaReferencia(bucket, refLib.dim);
+              cachedDecodedBuckets.set(cacheKey, decoded);
+            }
+
+            const cropKey = ATRIBUTO_A_RECORTE[attr];
+            let qVec = cropVecCache.get(cropKey);
+            if (!qVec) {
+              qVec = await calcularEmbeddingImagen(
+                embedder,
+                toRawImageRgb(crops[cropKey])
+              );
+              cropVecCache.set(cropKey, qVec);
+            }
+
+            const knn = votarKnn(qVec, decoded);
+            similitudPorAttr[attr] = Number(knn.maxSim.toFixed(4));
+            const zsProbs = Object.fromEntries(
+              zsGroup.all.map((c) => [c.id, c.confidence])
+            );
+            const blended = mezclarProbabilidades(zsProbs, knn.probs, 0.6);
+            const updatedGroup = reconstruirGrupoConBlend(
+              zsGroup,
+              blended,
+              knn.maxSim
+            );
+
+            switch (attr) {
+              case "category":
+                result.category = updatedGroup as typeof result.category;
+                break;
+              case "neckline":
+                result.neckline = updatedGroup as typeof result.neckline;
+                break;
+              case "sleeve":
+                result.sleeves = updatedGroup as typeof result.sleeves;
+                break;
+              case "fit":
+                result.fit = updatedGroup as typeof result.fit;
+                break;
+              case "length":
+                result.length = updatedGroup as typeof result.length;
+                break;
+              case "skirtCut":
+                result.skirtCut = updatedGroup as typeof result.skirtCut;
+                break;
+              case "pantsCut":
+                result.pantsCut = updatedGroup as typeof result.pantsCut;
+                break;
+              case "waistTie":
+                result.waistTie = updatedGroup as typeof result.waistTie;
+                break;
+              case "ruffle":
+                result.ruffle = updatedGroup as typeof result.ruffle;
+                break;
+              case "fabric":
+                result.fabric = updatedGroup as typeof result.fabric;
+                break;
+              case "print":
+                result.print = updatedGroup as typeof result.print;
+                break;
+            }
+            blendedAny = true;
+          }
+
+          if (blendedAny) {
+            result.referenciaUsada = true;
+            result.similitudReferenciaPorAtributo = similitudPorAttr;
+          }
+        }
+      }
+    } catch {
+      // Fallback limpio a zero-shot si falla carga del embedder o biblioteca
+    }
+  }
+
+  return result;
 }

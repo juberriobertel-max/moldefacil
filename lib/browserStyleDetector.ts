@@ -22,8 +22,10 @@ import {
 import {
   CropRawInput,
   ejecutarInferenciaEnCascada,
+  extraerVectorDeRecorte,
   getCascadeEngineStatus,
 } from "./vision/cascadeRunner";
+import { ATRIBUTO_A_RECORTE, type AtributoVision } from "./vision/visionAttributes";
 import type {
   WorkerRequestMessage,
   WorkerResponseMessage,
@@ -68,6 +70,14 @@ const pendingWarmups = new Map<
   number,
   { resolve: () => void; reject: (err: Error) => void }
 >();
+const pendingEmbeddings = new Map<
+  number,
+  {
+    resolve: (v: { modelId: string; dim: number; vectorInt8B64: string }) => void;
+    reject: (err: Error) => void;
+  }
+>();
+let lastPreprocessedCrops: Record<VisionCropKey, CropRawInput> | null = null;
 
 function asegurarWorker(): Worker | null {
   if (
@@ -120,6 +130,15 @@ function asegurarWorker(): Worker | null {
           return;
         }
 
+        if (msg.type === "embed_crop_result") {
+          const embTask = pendingEmbeddings.get(msg.requestId);
+          if (embTask) {
+            pendingEmbeddings.delete(msg.requestId);
+            embTask.resolve(msg.payload);
+          }
+          return;
+        }
+
         if (msg.type === "error") {
           modelFailedState = true;
           const task = pendingTasks.get(msg.requestId);
@@ -131,6 +150,11 @@ function asegurarWorker(): Worker | null {
           if (warm) {
             pendingWarmups.delete(msg.requestId);
             warm.reject(new Error(msg.reason));
+          }
+          const embTask = pendingEmbeddings.get(msg.requestId);
+          if (embTask) {
+            pendingEmbeddings.delete(msg.requestId);
+            embTask.reject(new Error(msg.reason));
           }
         }
       }
@@ -150,6 +174,10 @@ function asegurarWorker(): Worker | null {
         warm.reject(err);
       }
       pendingWarmups.clear();
+      for (const [, emb] of pendingEmbeddings) {
+        emb.reject(err);
+      }
+      pendingEmbeddings.clear();
     });
 
     sharedWorker = worker;
@@ -293,6 +321,7 @@ export async function detectFashionStyleInBrowser(
           rgba: prep.crops.waistLower.rgba,
         },
       };
+      lastPreprocessedCrops = cropInputs;
 
       const rawEval = await ejecutarEnWorkerOProceso(
         cropInputs,
@@ -338,4 +367,52 @@ export async function detectFashionStyleInBrowser(
   } finally {
     if (timerId !== undefined) clearTimeout(timerId);
   }
+}
+
+/**
+ * Extrae el vector cuantizado de la última imagen analizada para enviarlo con consentimiento
+ * (nunca envía la foto) cuando la usuaria corrige un atributo.
+ */
+export async function extraerVectorCorreccionEnNavegador(
+  attr: AtributoVision,
+  modelId?: string
+): Promise<{
+  modelId: string;
+  cropKey: VisionCropKey;
+  dim: number;
+  vectorInt8B64: string;
+} | null> {
+  if (!lastPreprocessedCrops) return null;
+  const cropKey = ATRIBUTO_A_RECORTE[attr];
+  const crop = lastPreprocessedCrops[cropKey];
+  if (!crop) return null;
+
+  const worker = asegurarWorker();
+  if (!worker) {
+    const res = await extraerVectorDeRecorte(crop, modelId);
+    return { ...res, cropKey };
+  }
+
+  return new Promise((resolve) => {
+    const requestId = nextRequestId++;
+    pendingEmbeddings.set(requestId, {
+      resolve: (res) => resolve({ ...res, cropKey }),
+      reject: () => resolve(null),
+    });
+    try {
+      const req: WorkerRequestMessage = {
+        type: "embed_crop",
+        requestId,
+        crop,
+        modelId,
+      };
+      worker.postMessage(req);
+    } catch {
+      pendingEmbeddings.delete(requestId);
+      void extraerVectorDeRecorte(crop, modelId).then(
+        (res) => resolve({ ...res, cropKey }),
+        () => resolve(null)
+      );
+    }
+  });
 }
