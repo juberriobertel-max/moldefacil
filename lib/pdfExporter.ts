@@ -577,6 +577,30 @@ export function exportPatternToPdf(options: ExportPdfOptions): {
       130,
       48
     );
+    if (pattern.seamValidation) {
+      const okCount = pattern.seamValidation.checks.filter((c) => c.passed).length;
+      const totalCount = pattern.seamValidation.checks.length;
+      if (pattern.seamValidation.verified) {
+        doc.setTextColor(13, 148, 136);
+        doc.text(
+          `Verificación de patronaje: OK (${okCount}/${totalCount} controles: costuras, simetría y pinzas)`,
+          130,
+          59
+        );
+      } else {
+        const failedLabels = pattern.seamValidation.checks
+          .filter((c) => !c.passed)
+          .map((c) => c.label)
+          .join(", ");
+        doc.setTextColor(180, 83, 9);
+        doc.text(
+          `ATENCIÓN — Revisar tolerancias antes de cortar: ${failedLabels}`,
+          130,
+          59
+        );
+      }
+      doc.setTextColor(15, 23, 42);
+    }
 
     const originXmm = 250; // 25 cm left buffer
     const originYmm = 250; // 25 cm top buffer
@@ -626,8 +650,37 @@ export function exportPatternToPdf(options: ExportPdfOptions): {
     36
   );
 
+  let boxY = 45;
+  if (pattern.seamValidation) {
+    const okCount = pattern.seamValidation.checks.filter((c) => c.passed).length;
+    const totalCount = pattern.seamValidation.checks.length;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    if (pattern.seamValidation.verified) {
+      doc.setTextColor(13, 148, 136);
+      doc.text(
+        `Verificación de patronaje: OK (${okCount}/${totalCount} controles: costados, sisas, simetría y pinzas)`,
+        15,
+        42
+      );
+    } else {
+      const failedLabels = pattern.seamValidation.checks
+        .filter((c) => !c.passed)
+        .map((c) => c.label)
+        .join(", ");
+      doc.setTextColor(180, 83, 9);
+      doc.text(
+        `ATENCIÓN — Revisar tolerancias antes de cortar: ${failedLabels}`,
+        15,
+        42
+      );
+    }
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(15, 23, 42);
+    boxY = 48;
+  }
+
   const boxX = 15;
-  const boxY = 45;
   doc.setDrawColor(15, 23, 42);
   doc.setLineWidth(0.5);
   doc.rect(boxX, boxY, 50, 50);
