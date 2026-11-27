@@ -1394,7 +1394,8 @@ function construirMangas(
     let tFinBrazo = 0.36;
     if (
       config.manga === "largaPegada" ||
-      config.manga === "acampanada"
+      config.manga === "acampanada" ||
+      config.manga === "raglan"
     ) {
       tFinBrazo = clamp(perfil.largoMangaM / largoBrazoReal, 0.72, 0.99);
     } else if (config.manga === "farol") {
@@ -2709,53 +2710,89 @@ function poblarCosturasParteSuperior(
 ): { etiquetaPinza?: Etiqueta3DAncla } {
   let tienePinzas = false;
 
-  // 1. Costuras de hombro (hombro -> cuello; en kimono continúa por la cresta de la manga)
-  for (const lado of [-1, 1] as const) {
-    const ptsHombro: THREE.Vector3[] = [];
-    const pasos = 10;
-    for (let i = 0; i <= pasos; i++) {
-      const t = i / pasos;
-      if (config.manga === "kimono" && t > 0.5) {
-        const tf = (t - 0.5) / 0.5;
-        const yRef = THREE.MathUtils.lerp(
-          perfil.hombroYM - cmAMetros(1.4),
-          perfil.hombroYM - cmAMetros(4.2),
-          tf
+  // 1. Costuras de hombro (hombro -> cuello; omitidas en raglán; en kimono continúa por la cresta de la manga)
+  if (config.manga !== "raglan") {
+    for (const lado of [-1, 1] as const) {
+      const ptsHombro: THREE.Vector3[] = [];
+      const pasos = 10;
+      for (let i = 0; i <= pasos; i++) {
+        const t = i / pasos;
+        if (config.manga === "kimono" && t > 0.5) {
+          const tf = (t - 0.5) / 0.5;
+          const yRef = THREE.MathUtils.lerp(
+            perfil.hombroYM - cmAMetros(1.4),
+            perfil.hombroYM - cmAMetros(4.2),
+            tf
+          );
+          const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, yRef);
+          const pt = muestrearPuntoTorsoPrenda(
+            anillo,
+            lado * Math.PI * 0.5,
+            perfil,
+            config,
+            ajusteStretchM
+          );
+          ptsHombro.push(
+            new THREE.Vector3(pt.x, pt.y + OFFSET_COSTURA_M * 1.4, pt.z)
+          );
+        } else {
+          const u = config.manga === "kimono" ? t / 0.5 : t;
+          const theta = lado * THREE.MathUtils.lerp(0.42, Math.PI * 0.5, u);
+          const yTop = calcularAlturaTopEscoteYSisa(config, theta, perfil);
+          const pt = evaluarPuntoTorsoConOffset(
+            perfil,
+            config,
+            yTop,
+            theta,
+            ajusteStretchM,
+            OFFSET_COSTURA_M
+          );
+          pt.y += 0.002;
+          ptsHombro.push(pt);
+        }
+      }
+      grupoCosturas.add(
+        crearLineaPespunte(
+          ptsHombro,
+          mat,
+          `costura-hombro-${lado > 0 ? "izq" : "der"}`
+        )
+      );
+    }
+  } else {
+    // Costuras diagonales raglán (escote delantero/espalda -> axila)
+    for (const lado of [-1, 1] as const) {
+      for (const esFront of [true, false]) {
+        const ptsRaglan: THREE.Vector3[] = [];
+        const thetaStart = lado * (esFront ? 0.36 : Math.PI - 0.34);
+        const thetaEnd = lado * Math.PI * 0.5;
+        const yStart = calcularAlturaTopEscoteYSisa(config, thetaStart, perfil);
+        const yEnd = perfil.bustoYM - cmAMetros(5.2);
+        for (let i = 0; i <= 10; i++) {
+          const t = i / 10;
+          const theta = THREE.MathUtils.lerp(thetaStart, thetaEnd, t);
+          const curveSag = Math.sin(t * Math.PI) * cmAMetros(1.2);
+          const y = THREE.MathUtils.lerp(yStart, yEnd, t) - curveSag;
+          ptsRaglan.push(
+            evaluarPuntoTorsoConOffset(
+              perfil,
+              config,
+              y,
+              theta,
+              ajusteStretchM,
+              OFFSET_COSTURA_M + 0.001
+            )
+          );
+        }
+        grupoCosturas.add(
+          crearLineaPespunte(
+            ptsRaglan,
+            mat,
+            `costura-raglan-${esFront ? "del" : "tra"}-${lado > 0 ? "izq" : "der"}`
+          )
         );
-        const anillo = evaluarPerfilEnY(perfil.anillosInterpolados, yRef);
-        const pt = muestrearPuntoTorsoPrenda(
-          anillo,
-          lado * Math.PI * 0.5,
-          perfil,
-          config,
-          ajusteStretchM
-        );
-        ptsHombro.push(
-          new THREE.Vector3(pt.x, pt.y + OFFSET_COSTURA_M * 1.4, pt.z)
-        );
-      } else {
-        const u = config.manga === "kimono" ? t / 0.5 : t;
-        const theta = lado * THREE.MathUtils.lerp(0.42, Math.PI * 0.5, u);
-        const yTop = calcularAlturaTopEscoteYSisa(config, theta, perfil);
-        const pt = evaluarPuntoTorsoConOffset(
-          perfil,
-          config,
-          yTop,
-          theta,
-          ajusteStretchM,
-          OFFSET_COSTURA_M
-        );
-        pt.y += 0.002;
-        ptsHombro.push(pt);
       }
     }
-    grupoCosturas.add(
-      crearLineaPespunte(
-        ptsHombro,
-        mat,
-        `costura-hombro-${lado > 0 ? "izq" : "der"}`
-      )
-    );
   }
 
   // 2. Costuras de costados (θ = ±90°, axila -> borde inferior top)
@@ -2783,8 +2820,8 @@ function poblarCosturasParteSuperior(
     );
   }
 
-  // 3. Costura de sisa (OMITIDA explícitamente cuando manga === 'kimono')
-  if (config.manga !== "kimono") {
+  // 3. Costura de sisa (OMITIDA explícitamente cuando manga === 'kimono' o 'raglan')
+  if (config.manga !== "kimono" && config.manga !== "raglan") {
     const yTopSisa = perfil.hombroYM - cmAMetros(1.8);
     const yBotSisa = Math.max(yInferiorTopM + cmAMetros(2), perfil.bustoYM - cmAMetros(4.8));
     const yMidSisa = (yTopSisa + yBotSisa) * 0.5;
@@ -2819,8 +2856,63 @@ function poblarCosturasParteSuperior(
     }
   }
 
-  // 4. Pinza de busto (costado -> ápice) en cuerpo adulto femenino
-  if (!config.esInfantil) {
+  // 3b. Canesú trasero horizontal (when active)
+  if (config.canesuEspalda && !config.cortePrincesa && config.manga !== "kimono" && config.manga !== "raglan") {
+    const ptsCanesu: THREE.Vector3[] = [];
+    const yCanesu = perfil.hombroYM - cmAMetros(10.0);
+    for (let i = 0; i <= 16; i++) {
+      const th = THREE.MathUtils.lerp(Math.PI * 0.62, Math.PI * 1.38, i / 16);
+      ptsCanesu.push(
+        evaluarPuntoTorsoConOffset(
+          perfil,
+          config,
+          yCanesu,
+          th,
+          ajusteStretchM,
+          OFFSET_COSTURA_M + 0.001
+        )
+      );
+    }
+    grupoCosturas.add(crearLineaPespunte(ptsCanesu, mat, "costura-canesu-espalda"));
+  }
+
+  // 4. Corte Princesa o Pinza de busto (costado -> ápice) en cuerpo adulto femenino
+  if (config.cortePrincesa && config.manga !== "kimono" && config.manga !== "raglan") {
+    for (const lado of [-1, 1] as const) {
+      for (const esFront of [true, false]) {
+        const ptsPrincesa: THREE.Vector3[] = [];
+        const thSisa = lado * (esFront ? 1.24 : Math.PI - 1.18);
+        const thApex = lado * (esFront ? 0.42 : Math.PI - 0.4);
+        const ySisaMid = (perfil.hombroYM + perfil.bustoYM) * 0.5 - cmAMetros(2.0);
+        const yApex = perfil.bustoYM - cmAMetros(0.4);
+        for (let i = 0; i <= 14; i++) {
+          const t = i / 14;
+          const y = THREE.MathUtils.lerp(ySisaMid, yInferiorTopM, t);
+          const th =
+            y >= yApex
+              ? THREE.MathUtils.lerp(thSisa, thApex, (ySisaMid - y) / Math.max(0.01, ySisaMid - yApex))
+              : thApex;
+          ptsPrincesa.push(
+            evaluarPuntoTorsoConOffset(
+              perfil,
+              config,
+              y,
+              th,
+              ajusteStretchM,
+              OFFSET_COSTURA_M + 0.001
+            )
+          );
+        }
+        grupoCosturas.add(
+          crearLineaPespunte(
+            ptsPrincesa,
+            mat,
+            `costura-princesa-${esFront ? "del" : "tra"}-${lado > 0 ? "izq" : "der"}`
+          )
+        );
+      }
+    }
+  } else if (!config.esInfantil) {
     tienePinzas = true;
     for (const lado of [-1, 1] as const) {
       const pSup = evaluarPuntoTorsoConOffset(
