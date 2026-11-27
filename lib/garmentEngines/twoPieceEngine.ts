@@ -101,14 +101,25 @@ export function generateTwoPiecePattern(
   );
 
   const effBust = measurements.bust * easeFactor + flatEase;
+  const effFrameBust = pro.hasCustomHighBust
+    ? pro.frameBust * easeFactor + flatEase
+    : effBust;
   const effWaist = measurements.waist * easeFactor + flatEase;
   const effHip = measurements.hip * easeFactor + flatEase;
   const effBack = measurements.backWidth * easeFactor + flatEase * 0.4;
 
   const bustSplit = fabricType === "woven" ? 1.0 : 0.4;
   const quarterBust = effBust / 4;
-  const frontQuarterBust = quarterBust + bustSplit;
-  const backQuarterBust = Math.max(frontQuarterBust - 2.0, quarterBust - bustSplit);
+  const frameQuarterBust = effFrameBust / 4;
+  const backQuarterBust = pro.hasCustomHighBust
+    ? Math.max(12, frameQuarterBust - bustSplit)
+    : Math.max(quarterBust + bustSplit - 2.0, quarterBust - bustSplit);
+  const frontQuarterBust = pro.hasCustomHighBust
+    ? Math.max(
+        backQuarterBust * 0.85,
+        frameQuarterBust + bustSplit + pro.fbaHalfFrontCm * easeFactor
+      )
+    : quarterBust + bustSplit;
   const quarterWaist = effWaist / 4;
   const quarterHip = effHip / 4;
   const halfBack = effBack / 2;
@@ -152,7 +163,7 @@ export function generateTwoPiecePattern(
     (useWaistDart ? waistDartIntake : 0);
 
   const isKimono = sleeveStyle === "kimono";
-  const neckW = Math.max(6.2, effBust * 0.075);
+  const neckW = Math.max(6.2, effFrameBust * 0.075);
   const baseNeckDrop =
     necklineStyle === "v_neck" || necklineStyle === "tailored_lapel"
       ? 14
@@ -167,7 +178,7 @@ export function generateTwoPiecePattern(
   const backNeckDrop = 2.5;
   const shoulderSlope = 2.8;
   const shoulderX = Math.max(neckW + 6, halfBack + 1.5);
-  const armholeDepth = Math.min(backTopLen - 6, Math.max(17, effBust * 0.215));
+  const armholeDepth = Math.min(backTopLen - 6, Math.max(17, effFrameBust * 0.215));
 
   const frontArmholeCmd: PathCommand = {
     type: "C",

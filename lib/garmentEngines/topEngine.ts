@@ -30,6 +30,7 @@ import {
   buildKimonoWingSegment,
   buildPocketBagPiece,
   buildRibNeckbandPiece,
+  buildShirtBackYokeGeometry,
   buildShirtCuffPiece,
   buildShirtDressDetailPieces,
   buildSleevePiece,
@@ -44,6 +45,8 @@ import {
   createSidePocketNotches,
 } from "./extrasEngine";
 import { buildAnatomicalNeckFacing, buildTruedSideBustDart } from "./dartUtils";
+import { buildPrincessBodicePanels } from "./princessEngine";
+import { buildRaglanGeometry } from "./raglanEngine";
 import { resolveProMeasurements } from "../seamValidator";
 
 export interface TopEngineInput {
@@ -101,15 +104,26 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   );
 
   const effBust = measurements.bust * easeFactor + flatEase;
+  const effFrameBust = pro.hasCustomHighBust
+    ? pro.frameBust * easeFactor + flatEase
+    : effBust;
   const effWaist = measurements.waist * easeFactor + flatEase;
   const effHip = measurements.hip * easeFactor + flatEase;
   const effBack = measurements.backWidth * easeFactor + flatEase * 0.4;
 
-  // Anatomical front/back balance: +1.0 cm front, -1.0 cm back on woven; +0.5/-0.5 on stretch
+  // Anatomical front/back balance: +1.0 cm front, -1.0 cm back on woven; +0.4/-0.4 on stretch
   const bustSplit = fabricType === "woven" ? 1.0 : 0.4;
   const quarterBust = effBust / 4;
-  const frontQuarterBust = quarterBust + bustSplit;
-  const backQuarterBust = Math.max(frontQuarterBust - 2.0, quarterBust - bustSplit);
+  const frameQuarterBust = effFrameBust / 4;
+  const backQuarterBust = pro.hasCustomHighBust
+    ? Math.max(12, frameQuarterBust - bustSplit)
+    : Math.max(quarterBust + bustSplit - 2.0, quarterBust - bustSplit);
+  const frontQuarterBust = pro.hasCustomHighBust
+    ? Math.max(
+        backQuarterBust * 0.85,
+        frameQuarterBust + bustSplit + pro.fbaHalfFrontCm * easeFactor
+      )
+    : quarterBust + bustSplit;
   const quarterWaist = effWaist / 4;
   const quarterHip = effHip / 4;
   const frontQuarterHip = quarterHip + bustSplit * 0.5;
@@ -128,9 +142,7 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
     fabricType === "woven" &&
     torsoFit === "fitted" &&
     (isTailoredGarment || subStyle === "blouse");
-  const waistDartIntake = isTailoredGarment ? 2.8 : 2.2;
-  const frontTorsoWaistX = useWaistDart ? frontBaseWaistX + waistDartIntake : frontBaseWaistX;
-  const backTorsoWaistX = useWaistDart ? backBaseWaistX + waistDartIntake : backBaseWaistX;
+  const baseWaistDartIntake = isTailoredGarment ? 2.8 : 2.2;
 
   const halfBack = effBack / 2;
 
@@ -140,22 +152,62 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   const backTotalLen = backBodiceLen + hipExt;
 
   const isKimono = sleeveStyle === "kimono";
+  const isRaglan =
+    sleeveStyle === "raglan" && !isWrapFront && !useTailoredLapel;
   const isPeasant = styleVariant === "peasant_offshoulder";
+  const usePrincess =
+    Boolean(extras?.princessSeam) &&
+    fabricType === "woven" &&
+    !isKimono &&
+    !isRaglan &&
+    !isWrapFront &&
+    !useTailoredLapel;
+  const useBackYoke =
+    fabricType === "woven" &&
+    (useShirtCollar || Boolean(extras?.backYoke)) &&
+    !isKimono &&
+    !isRaglan &&
+    !usePrincess &&
+    !isWrapFront &&
+    !useTailoredLapel;
+
   const useSideBustDart =
     fabricType === "woven" &&
     torsoFit === "fitted" &&
     !isKimono &&
-    (subStyle === "blouse" || subStyle === "jacket" || styleVariant === "office_dart");
+    !usePrincess &&
+    (subStyle === "blouse" || subStyle === "jacket" || styleVariant === "office_dart") &&
+    !(pro.hasCustomHighBust && pro.fbaHalfFrontCm <= -2.0 && !pro.hasCustomFrontBodiceLength);
 
-  const bustDartIntake = useSideBustDart
-    ? Math.max(2.0, Math.min(4.5, rawFrontBodiceLen - backBodiceLen || 2.4))
+  const rawCupBustDart = useSideBustDart
+    ? Math.max(1.4, rawFrontBodiceLen - backBodiceLen || 2.4)
     : 0;
+  const bustDartExcessToWaist =
+    useSideBustDart && rawCupBustDart > 4.8
+      ? Math.min(2.6, Number((rawCupBustDart - 4.5).toFixed(2)))
+      : 0;
+  const bustDartIntake = useSideBustDart
+    ? Math.max(1.4, Math.min(4.5, rawCupBustDart))
+    : 0;
+  const frontWaistDartIntake = useWaistDart
+    ? Number((baseWaistDartIntake + bustDartExcessToWaist).toFixed(2))
+    : bustDartExcessToWaist;
+  const backWaistDartIntake = useWaistDart ? baseWaistDartIntake : 0;
+
+  const frontTorsoWaistX =
+    useWaistDart || bustDartExcessToWaist > 0
+      ? frontBaseWaistX + frontWaistDartIntake
+      : frontBaseWaistX;
+  const backTorsoWaistX = useWaistDart
+    ? backBaseWaistX + backWaistDartIntake
+    : backBaseWaistX;
+
   const frontBodiceLen = useSideBustDart
     ? backBodiceLen + bustDartIntake
     : backBodiceLen;
   const frontTotalLen = frontBodiceLen + hipExt;
 
-  const neckW = Math.max(6.2, effBust * (isPeasant ? 0.115 : 0.075));
+  const neckW = Math.max(6.2, effFrameBust * (isPeasant ? 0.115 : 0.075));
   const baseNeckDrop =
     necklineStyle === "v_neck" || necklineStyle === "tailored_lapel"
       ? 14
@@ -171,12 +223,42 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   const shoulderSlope = 2.8;
   const shoulderX = Math.max(neckW + 6, halfBack + 1.5);
   const backShoulderEase = isTailoredGarment ? 0.6 : 0;
-  const armholeDepth = Math.max(16, effBust * 0.215 * armholeDepthMultiplier);
+  const armholeDepth = Math.max(16, effFrameBust * 0.215 * armholeDepthMultiplier);
+  const forwardShoulderDrop = useBackYoke ? 1.5 : 0;
+
+  const withShirtCuff =
+    useShirtCollar &&
+    (sleeveStyle === "long" || sleeveStyle === "raglan") &&
+    fabricType === "woven" &&
+    !extras?.flaredSleeve;
+
+  const raglanData = isRaglan
+    ? buildRaglanGeometry({
+        neckW,
+        frontNeckDrop,
+        backNeckDrop,
+        necklineStyle,
+        shoulderX,
+        shoulderSlope,
+        armholeDepth,
+        frontQuarterBust,
+        backQuarterBust,
+        sleeveLengthCm: measurements.sleeveLength,
+        fabricType,
+        flaredSleeve: extras?.flaredSleeve,
+        bicepCm: pro.bicep,
+        wristCm: pro.wrist,
+        withShirtCuff,
+        seamAllowance,
+      })
+    : null;
+
+  const sideTopY = raglanData ? raglanData.raglanUnderarmY : armholeDepth;
 
   // Back side seam target length (armhole corner -> waist corner) for exact matching
   const backSideSeamUpperLen = Math.hypot(
     backTorsoWaistX - backQuarterBust,
-    backBodiceLen - armholeDepth
+    backBodiceLen - sideTopY
   );
   const hipCurveLenFront = cubicBezierLength(
     { x: frontTorsoWaistX, y: frontBodiceLen },
@@ -205,7 +287,7 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   if (useSideBustDart) {
     for (let iter = 0; iter < 3; iter++) {
       truedBustDart = buildTruedSideBustDart({
-        topPoint: { x: frontQuarterBust, y: armholeDepth },
+        topPoint: { x: frontQuarterBust, y: sideTopY },
         botPoint: { x: frontTorsoWaistX, y: solvedFrontSideWaistY },
         apex: {
           x: pro.bustSeparation / 2,
@@ -251,16 +333,16 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
       })
     : null;
 
-  const frontArmholeCmd: PathCommand = {
+  const frontArmholeCmd: Extract<PathCommand, { type: "C" }> = {
     type: "C",
     cp1x: shoulderX - 2.2,
-    cp1y: armholeDepth * 0.54,
+    cp1y: Number((forwardShoulderDrop + (armholeDepth - forwardShoulderDrop) * 0.54).toFixed(2)),
     cp2x: frontQuarterBust * 0.82,
     cp2y: armholeDepth,
     x: frontQuarterBust,
     y: armholeDepth,
   };
-  const backArmholeCmd: PathCommand = {
+  const backArmholeCmd: Extract<PathCommand, { type: "C" }> = {
     type: "C",
     cp1x: shoulderX + backShoulderEase - 0.3,
     cp1y: armholeDepth * 0.58,
@@ -270,30 +352,65 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
     y: armholeDepth,
   };
 
+  const backYokeData = useBackYoke
+    ? buildShirtBackYokeGeometry({
+        neckW,
+        backNeckDrop,
+        backShoulderX: shoulderX + backShoulderEase,
+        shoulderSlope,
+        armholeDepth,
+        backQuarterBust,
+        backArmholeCmd,
+        cutLowerBackOnFold: true,
+        forwardShoulderCm: forwardShoulderDrop,
+        seamAllowance,
+      })
+    : null;
+
   const frontArmholeLen = cubicBezierLength(
-    { x: shoulderX, y: shoulderSlope },
+    { x: shoulderX, y: shoulderSlope + forwardShoulderDrop },
     { x: frontArmholeCmd.cp1x, y: frontArmholeCmd.cp1y },
     { x: frontArmholeCmd.cp2x, y: frontArmholeCmd.cp2y },
     { x: frontQuarterBust, y: armholeDepth }
   );
-  const backArmholeLen = cubicBezierLength(
-    { x: shoulderX + backShoulderEase, y: shoulderSlope },
-    { x: backArmholeCmd.cp1x, y: backArmholeCmd.cp1y },
-    { x: backArmholeCmd.cp2x, y: backArmholeCmd.cp2y },
-    { x: backQuarterBust, y: armholeDepth }
-  );
+  const backArmholeLen = backYokeData
+    ? backYokeData.upperArmholeLenCm + backYokeData.lowerArmholeLenCm
+    : cubicBezierLength(
+        { x: shoulderX + backShoulderEase, y: shoulderSlope },
+        { x: backArmholeCmd.cp1x, y: backArmholeCmd.cp1y },
+        { x: backArmholeCmd.cp2x, y: backArmholeCmd.cp2y },
+        { x: backQuarterBust, y: armholeDepth }
+      );
   const totalArmholePerimeter = frontArmholeLen + backArmholeLen;
 
-  const frontNeckCmds = buildNecklineCommand(neckW, frontNeckDrop, necklineStyle);
-  const backNeckCmds = buildNecklineCommand(neckW, backNeckDrop, "round");
-  const frontNeckArc = commandsArcLength([
-    { type: "M", x: 0, y: frontNeckDrop },
-    ...frontNeckCmds,
-  ]);
-  const backNeckArc = commandsArcLength([
-    { type: "M", x: 0, y: backNeckDrop },
-    ...backNeckCmds,
-  ]);
+  const rawFrontNeckCmds = buildNecklineCommand(neckW, frontNeckDrop, necklineStyle);
+  const shiftedFrontNeckCmds: PathCommand[] = useBackYoke
+    ? rawFrontNeckCmds.map((c) =>
+        c.type === "L"
+          ? { ...c, y: Number((c.y + forwardShoulderDrop).toFixed(2)) }
+          : c.type === "C"
+            ? {
+                ...c,
+                cp1y: Number((c.cp1y + forwardShoulderDrop).toFixed(2)),
+                cp2y: Number((c.cp2y + forwardShoulderDrop).toFixed(2)),
+                y: Number((c.y + forwardShoulderDrop).toFixed(2)),
+              }
+            : c
+      )
+    : rawFrontNeckCmds;
+  const frontNeckStartY = useBackYoke ? frontNeckDrop + forwardShoulderDrop : frontNeckDrop;
+  const frontNeckCmds = raglanData ? raglanData.frontNeckCmds : shiftedFrontNeckCmds;
+  const backNeckCmds = raglanData
+    ? raglanData.backNeckCmds
+    : buildNecklineCommand(neckW, backNeckDrop, "round");
+  const frontNeckArc = raglanData
+    ? raglanData.frontNeckRemainArcCm
+    : commandsArcLength([{ type: "M", x: 0, y: frontNeckStartY }, ...frontNeckCmds]);
+  const backNeckArc = raglanData
+    ? raglanData.backNeckRemainArcCm
+    : backYokeData
+      ? backYokeData.backNeckArcCm
+      : commandsArcLength([{ type: "M", x: 0, y: backNeckDrop }, ...backNeckCmds]);
 
   const pieces: PatternPiece[] = [];
   const wrapOverlap = Math.round(quarterWaist * 0.6);
@@ -306,15 +423,22 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
       })
     : [];
 
-  const frontUpperSide: PathCommand[] = kimonoWing
-    ? [...kimonoWing.commands, { type: "L", x: frontTorsoWaistX, y: frontWaistCornerY }]
-    : [
-        { type: "L", x: shoulderX, y: shoulderSlope },
-        frontArmholeCmd,
+  const frontUpperSide: PathCommand[] = raglanData
+    ? [
+        raglanData.frontBodyRaglanCmd,
         ...(truedBustDart
           ? truedBustDart.sideCommands
           : [{ type: "L" as const, x: frontTorsoWaistX, y: frontWaistCornerY }]),
-      ];
+      ]
+    : kimonoWing
+      ? [...kimonoWing.commands, { type: "L", x: frontTorsoWaistX, y: frontWaistCornerY }]
+      : [
+          { type: "L", x: shoulderX, y: shoulderSlope + forwardShoulderDrop },
+          frontArmholeCmd,
+          ...(truedBustDart
+            ? truedBustDart.sideCommands
+            : [{ type: "L" as const, x: frontTorsoWaistX, y: frontWaistCornerY }]),
+        ];
 
   const lapelGeom = useTailoredLapel
     ? buildTailoredLapelFrontGeometry({
@@ -356,14 +480,14 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
     ...(lapelGeom ? lapelGeom.internalLines : []),
     ...shirtButtonLines,
     ...(truedBustDart ? [truedBustDart.internalLine] : []),
-    ...(useWaistDart
+    ...(useWaistDart || bustDartExcessToWaist > 0
       ? [
           buildVerticalWaistDart({
             centerX: Number(Math.max(6.5, pro.bustSeparation / 2).toFixed(2)),
             topY: Number((pro.bustHeight * lengthMultiplier + 2.5).toFixed(2)),
             waistY: frontWaistCornerY,
             botY: Math.min(frontTotalHemY - 3, frontWaistCornerY + hipExt * 0.68),
-            halfWidthCm: Number((waistDartIntake / 2).toFixed(2)),
+            halfWidthCm: Number((frontWaistDartIntake / 2).toFixed(2)),
             label: "Pinza de entalle",
           }),
         ]
@@ -424,8 +548,8 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
         ]
       : useShirtCollar
         ? [
-            { type: "M", x: -shirtExt, y: frontNeckDrop },
-            { type: "L", x: 0, y: frontNeckDrop },
+            { type: "M", x: -shirtExt, y: frontNeckStartY },
+            { type: "L", x: 0, y: frontNeckStartY },
             ...frontNeckCmds,
             ...frontUpperSide,
             {
@@ -441,7 +565,7 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
             { type: "Z" },
           ]
         : [
-            { type: "M", x: 0, y: frontNeckDrop },
+            { type: "M", x: 0, y: frontNeckStartY },
             ...frontNeckCmds,
             ...frontUpperSide,
             {
@@ -462,246 +586,442 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
   const frontShoulderLen = Math.hypot(shoulderX - neckW, shoulderSlope);
   const frontUpperSideMeasured = truedBustDart
     ? truedBustDart.closedSideLengthCm
-    : Math.hypot(frontTorsoWaistX - frontQuarterBust, frontWaistCornerY - armholeDepth);
+    : Math.hypot(frontTorsoWaistX - frontQuarterBust, frontWaistCornerY - sideTopY);
+  const backShoulderX = shoulderX + backShoulderEase;
+  const backShoulderLen = Math.hypot(backShoulderX - neckW, shoulderSlope);
 
-  pieces.push(
-    normalizePiece(
-      {
-        id: "front",
-        name: isWrapFront
-          ? "DELANTERO CRUZADO (x2)"
-          : useTailoredLapel
-            ? "DELANTERO CHAQUETA / BLAZER (x2)"
-            : useShirtCollar
-              ? "DELANTERO CAMISA C/ CRUCE (x2)"
-              : subStyle === "jacket"
-                ? "DELANTERO CHAQUETA (x2)"
-                : "DELANTERO (x1 al doblez)",
-        subtitle: isWrapFront
-          ? kimonoWing
-            ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Cortar 2 piezas`
-            : "Cortar 2 piezas (Izquierda y Derecha)"
-          : useTailoredLapel
-            ? "Con cruce, solapa y pinzas | Cortar 2 piezas"
-            : truedBustDart
-              ? `Pinza busto afinada | Sisa del: ${frontArmholeLen.toFixed(1)} cm`
-              : kimonoWing
-                ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoWing.underarmCurveLenCm} cm`
-                : `Sisa del: ${frontArmholeLen.toFixed(1)} cm`,
-        tabLabel: isWrapFront
-          ? "Delantero Cruzado"
-          : useTailoredLapel
-            ? "Delantero Solapa"
-            : "Delantero",
-        seamPath: frontSeam,
-        grainline: {
-          x1: Math.max(4, frontBaseWaistX * 0.45),
-          y1: Math.max(frontNeckDrop + 3, 12),
-          x2: Math.max(4, frontBaseWaistX * 0.45),
-          y2: frontTotalHemY - 6,
-        },
-        notches: [
-          ...(kimonoWing
-            ? [
-                {
-                  x: kimonoWing.outerX,
-                  y: kimonoWing.outerDropY,
-                  angle: 0,
-                  label: "Puño Kimono",
-                },
-                {
-                  x: kimonoWing.joinX,
-                  y: kimonoWing.joinY,
-                  angle: 0,
-                  label: "Axila",
-                },
-              ]
-            : [
-                {
-                  x: Number((shoulderX - (shoulderX - frontQuarterBust) * 0.25).toFixed(2)),
-                  y: Number((armholeDepth * 0.65).toFixed(2)),
-                  angle: 0,
-                  label: "Sisa del.",
-                  count: 1 as const,
-                },
-              ]),
-          {
-            x: frontTorsoWaistX,
-            y: frontWaistCornerY,
-            angle: 0,
-            label: torsoFit === "loose" ? "Cintura holgada" : "Cintura",
+  if (usePrincess) {
+    const backPrincess = buildPrincessBodicePanels({
+      panelPrefix: "back",
+      neckW,
+      neckDrop: backNeckDrop,
+      necklineStyle: "round",
+      shoulderX: backShoulderX,
+      shoulderSlope,
+      armholeDepth,
+      armholeCmd: backArmholeCmd,
+      quarterBust: backQuarterBust,
+      apexX: Math.max(6.0, backQuarterBust * 0.44),
+      apexY: armholeDepth + 3.0,
+      waistY: backBodiceLen,
+      totalLen: backTotalLen,
+      hipDrop: hipExt,
+      torsoWaistX: backTorsoWaistX,
+      quarterHip: backQuarterHip,
+      hemHalfW: backQuarterHip,
+      waistDartIntake: backWaistDartIntake || 2.0,
+      bustProjectionCm: 0,
+      isOpenCenter: false,
+      seamAllowance,
+      labelPrefix: "Espalda",
+    });
+    const frontPrincess = buildPrincessBodicePanels({
+      panelPrefix: "front",
+      neckW,
+      neckDrop: frontNeckDrop,
+      necklineStyle,
+      shoulderX,
+      shoulderSlope,
+      armholeDepth,
+      armholeCmd: frontArmholeCmd,
+      quarterBust: frontQuarterBust,
+      apexX: pro.bustSeparation / 2,
+      apexY: pro.bustHeight * lengthMultiplier,
+      waistY: backBodiceLen,
+      totalLen: backTotalLen,
+      hipDrop: hipExt,
+      torsoWaistX: frontTorsoWaistX,
+      quarterHip: frontQuarterHip,
+      hemHalfW: frontQuarterHip,
+      waistDartIntake: frontWaistDartIntake || 2.2,
+      bustProjectionCm: Math.max(0, rawFrontBodiceLen - backBodiceLen),
+      isOpenCenter: isOpenFront,
+      centerExtCm: useShirtCollar ? shirtExt : 0,
+      extraCenterInternalLines: [
+        ...shirtButtonLines,
+        ...(extras?.flapPockets
+          ? [
+              createFlapPocketMarkLine({
+                xStart: 1.5,
+                yTop: Math.min(backTotalLen - 5, backBodiceLen + 4.5),
+                widthCm: Math.min(12.5, Math.max(9.0, quarterHip * 0.42)),
+              }),
+            ]
+          : []),
+      ],
+      extraSideNotches: pocketNotches,
+      seamAllowance,
+      labelPrefix: "Delantero",
+      targetSideSeamLenCm: backPrincess.sideSeamLenCm,
+    });
+    pieces.push(
+      frontPrincess.centerPiece,
+      frontPrincess.sidePiece,
+      backPrincess.centerPiece,
+      backPrincess.sidePiece
+    );
+  } else {
+    pieces.push(
+      normalizePiece(
+        {
+          id: "front",
+          name: isWrapFront
+            ? "DELANTERO CRUZADO (x2)"
+            : useTailoredLapel
+              ? "DELANTERO CHAQUETA / BLAZER (x2)"
+              : useShirtCollar
+                ? "DELANTERO CAMISA C/ CRUCE (x2)"
+                : subStyle === "jacket"
+                  ? "DELANTERO CHAQUETA (x2)"
+                  : "DELANTERO (x1 al doblez)",
+          subtitle: isWrapFront
+            ? kimonoWing
+              ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Cortar 2 piezas`
+              : "Cortar 2 piezas (Izquierda y Derecha)"
+            : raglanData
+              ? `Sisa Raglán Delantera: ${raglanData.frontRaglanSeamCm.toFixed(1)} cm`
+              : useTailoredLapel
+                ? "Con cruce, solapa y pinzas | Cortar 2 piezas"
+                : truedBustDart
+                  ? `Pinza busto afinada | Sisa del: ${frontArmholeLen.toFixed(1)} cm`
+                  : kimonoWing
+                    ? `Manga Kimono (${kimonoWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoWing.underarmCurveLenCm} cm`
+                    : `Sisa del: ${frontArmholeLen.toFixed(1)} cm`,
+          tabLabel: isWrapFront
+            ? "Delantero Cruzado"
+            : useTailoredLapel
+              ? "Delantero Solapa"
+              : "Delantero",
+          seamPath: frontSeam,
+          grainline: {
+            x1: Math.max(4, frontBaseWaistX * 0.45),
+            y1: Math.max(frontNeckStartY + 3, 12),
+            x2: Math.max(4, frontBaseWaistX * 0.45),
+            y2: frontTotalHemY - 6,
           },
-          ...(lapelGeom ? lapelGeom.notches : []),
-          ...(isWrapFront
-            ? [
-                { x: 0, y: frontWaistCornerY, angle: 90, label: "Centro Delantero" },
-                { x: -wrapOverlap, y: frontWaistCornerY, angle: 180, label: "Cruce cintura" },
-              ]
-            : []),
-          ...pocketNotches,
-        ],
-        internalLines: frontInternalLines.length > 0 ? frontInternalLines : undefined,
-        labelPos: { x: frontBaseWaistX * 0.48, y: frontBodiceLen * 0.68 },
-        foldLine: isOpenFront
-          ? undefined
-          : { x1: 0, y1: frontNeckDrop, x2: 0, y2: frontTotalHemY },
-        edgeAllowances: isOpenFront
-          ? { 0: "curve" }
-          : {
+          notches: [
+            ...(raglanData
+              ? raglanData.frontNotches
+              : kimonoWing
+                ? [
+                    {
+                      x: kimonoWing.outerX,
+                      y: kimonoWing.outerDropY,
+                      angle: 0,
+                      label: "Puño Kimono",
+                    },
+                    {
+                      x: kimonoWing.joinX,
+                      y: kimonoWing.joinY,
+                      angle: 0,
+                      label: "Axila",
+                    },
+                  ]
+                : [
+                    {
+                      x: Number((shoulderX - (shoulderX - frontQuarterBust) * 0.25).toFixed(2)),
+                      y: Number((armholeDepth * 0.65).toFixed(2)),
+                      angle: 0,
+                      label: "Sisa del.",
+                      count: 1 as const,
+                    },
+                  ]),
+            {
+              x: frontTorsoWaistX,
+              y: frontWaistCornerY,
+              angle: 0,
+              label: torsoFit === "loose" ? "Cintura holgada" : "Cintura",
+            },
+            ...(lapelGeom ? lapelGeom.notches : []),
+            ...(isWrapFront
+              ? [
+                  { x: 0, y: frontWaistCornerY, angle: 90, label: "Centro Delantero" },
+                  { x: -wrapOverlap, y: frontWaistCornerY, angle: 180, label: "Cruce cintura" },
+                ]
+              : []),
+            ...pocketNotches,
+          ],
+          internalLines: frontInternalLines.length > 0 ? frontInternalLines : undefined,
+          labelPos: { x: frontBaseWaistX * 0.48, y: frontBodiceLen * 0.68 },
+          foldLine: isOpenFront
+            ? undefined
+            : { x1: 0, y1: frontNeckStartY, x2: 0, y2: frontTotalHemY },
+          edgeAllowances: isOpenFront
+            ? { 0: "curve" }
+            : {
+                0: "curve",
+                1: "seam",
+                2: "curve",
+              },
+          cutQuantity: isOpenFront ? 2 : 1,
+          cutOnFold: !isOpenFront,
+          seamAnchors: {
+            ...(raglanData
+              ? { raglanSeam: raglanData.frontRaglanSeamCm }
+              : {
+                  shoulder: Number(frontShoulderLen.toFixed(2)),
+                  armhole: Number(frontArmholeLen.toFixed(2)),
+                }),
+            sideSeam: Number((frontUpperSideMeasured + hipCurveLenFront).toFixed(2)),
+            neckline: Number(frontNeckArc.toFixed(2)),
+          },
+        },
+        seamAllowance
+      )
+    );
+
+    if (isWrapFront) {
+      pieces.push(
+        buildWrapFacingPiece({
+          neckW,
+          shoulderX,
+          shoulderSlope,
+          wrapOverlap,
+          wrapWaistY: frontWaistCornerY,
+          seamAllowance,
+        })
+      );
+    }
+
+    // 2. TRASERO (con o sin Canesú Camisero)
+    if (backYokeData) {
+      pieces.push(backYokeData.yokePiece);
+      const pleatX = -backYokeData.pleatHalfCm;
+      const splitY = backYokeData.splitYCm;
+      const lowerBackSeam: PathCommand[] = [
+        { type: "M", x: pleatX, y: splitY },
+        { type: "L", x: backYokeData.yokeJoinXCm, y: splitY },
+        backYokeData.lowerArmholeCmd,
+        { type: "L", x: backTorsoWaistX, y: backBodiceLen },
+        {
+          type: "C",
+          cp1x: backTorsoWaistX + (backQuarterHip - backTorsoWaistX) * 0.45,
+          cp1y: backBodiceLen + hipExt * 0.35,
+          cp2x: backQuarterHip,
+          cp2y: backBodiceLen + hipExt * 0.75,
+          x: backQuarterHip,
+          y: backTotalLen,
+        },
+        { type: "L", x: pleatX, y: backTotalLen },
+        { type: "Z" },
+      ];
+      pieces.push(
+        normalizePiece(
+          {
+            id: "back",
+            name: "TRASERO BAJO CANESÚ (x1 al doblez)",
+            subtitle: `Canesú: ${backYokeData.yokeJoinXCm.toFixed(1)} cm + Tabla +${(backYokeData.pleatHalfCm * 2).toFixed(0)} cm`,
+            tabLabel: "Trasero",
+            seamPath: lowerBackSeam,
+            grainline: {
+              x1: Math.max(4, backBaseWaistX * 0.45),
+              y1: splitY + 3,
+              x2: Math.max(4, backBaseWaistX * 0.45),
+              y2: backTotalLen - 6,
+            },
+            notches: [
+              { x: 0, y: splitY, angle: -90, label: "Tabla centro" },
+              {
+                x: Number((backYokeData.yokeJoinXCm * 0.5).toFixed(2)),
+                y: splitY,
+                angle: -90,
+                label: "Encuentro canesú",
+                count: 2,
+              },
+              {
+                x: backTorsoWaistX,
+                y: backBodiceLen,
+                angle: 0,
+                label: torsoFit === "loose" ? "Cintura holgada" : "Cintura",
+              },
+            ],
+            internalLines: [
+              ...(backYokeData.pleatHalfCm > 0
+                ? [
+                    {
+                      commands: [
+                        { type: "M" as const, x: 0, y: splitY },
+                        { type: "L" as const, x: 0, y: backTotalLen },
+                      ],
+                      style: "mark" as const,
+                      label: `Tabla centro (+${(backYokeData.pleatHalfCm * 2).toFixed(0)} cm)`,
+                    },
+                  ]
+                : []),
+              ...(useWaistDart
+                ? [
+                    buildVerticalWaistDart({
+                      centerX: Math.max(6.0, backQuarterBust * 0.44),
+                      topY: armholeDepth + 3.0,
+                      waistY: backBodiceLen,
+                      botY: Math.min(backTotalLen - 3, backBodiceLen + hipExt * 0.68),
+                      halfWidthCm: Number((backWaistDartIntake / 2).toFixed(2)),
+                      label: "Pinza espalda",
+                    }),
+                  ]
+                : []),
+            ],
+            labelPos: { x: backBaseWaistX * 0.48, y: backBodiceLen * 0.72 },
+            foldLine: { x1: pleatX, y1: splitY, x2: pleatX, y2: backTotalLen },
+            edgeAllowances: {
+              0: "seam",
+              1: "curve",
+              4: "hem",
+              5: "fold",
+            },
+            cutQuantity: 1,
+            cutOnFold: true,
+            seamAnchors: {
+              sideSeam: Number((backSideSeamUpperLen + hipCurveLenBack).toFixed(2)),
+              armhole: backYokeData.lowerArmholeLenCm,
+              yokeSeam: backYokeData.yokeJoinXCm,
+            },
+          },
+          seamAllowance
+        )
+      );
+    } else {
+      const backUpperSide: PathCommand[] = raglanData
+        ? [
+            raglanData.backBodyRaglanCmd,
+            { type: "L", x: backTorsoWaistX, y: backBodiceLen },
+          ]
+        : kimonoBackWing
+          ? [...kimonoBackWing.commands, { type: "L", x: backTorsoWaistX, y: backBodiceLen }]
+          : [
+              { type: "L", x: backShoulderX, y: shoulderSlope },
+              backArmholeCmd,
+              { type: "L", x: backTorsoWaistX, y: backBodiceLen },
+            ];
+
+      const backSeam: PathCommand[] = [
+        { type: "M", x: 0, y: backNeckDrop },
+        ...backNeckCmds,
+        ...backUpperSide,
+        {
+          type: "C",
+          cp1x: backTorsoWaistX + (backQuarterHip - backTorsoWaistX) * 0.45,
+          cp1y: backBodiceLen + hipExt * 0.35,
+          cp2x: backQuarterHip,
+          cp2y: backBodiceLen + hipExt * 0.75,
+          x: backQuarterHip,
+          y: backTotalLen,
+        },
+        { type: "L", x: 0, y: backTotalLen },
+        { type: "Z" },
+      ];
+
+      pieces.push(
+        normalizePiece(
+          {
+            id: "back",
+            name: "TRASERO (x1 al doblez)",
+            subtitle: raglanData
+              ? `Sisa Raglán Trasera: ${raglanData.backRaglanSeamCm.toFixed(1)} cm`
+              : kimonoBackWing
+                ? `Manga Kimono (${kimonoBackWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoBackWing.underarmCurveLenCm} cm`
+                : `Sisa tras: ${backArmholeLen.toFixed(1)} cm`,
+            tabLabel: "Trasero",
+            seamPath: backSeam,
+            grainline: {
+              x1: Math.max(4, backBaseWaistX * 0.45),
+              y1: 10,
+              x2: Math.max(4, backBaseWaistX * 0.45),
+              y2: backTotalLen - 6,
+            },
+            notches: [
+              ...(raglanData
+                ? raglanData.backNotches
+                : kimonoBackWing
+                  ? [
+                      {
+                        x: kimonoBackWing.outerX,
+                        y: kimonoBackWing.outerDropY,
+                        angle: 0,
+                        label: "Puño Kimono",
+                      },
+                      {
+                        x: kimonoBackWing.joinX,
+                        y: kimonoBackWing.joinY,
+                        angle: 0,
+                        label: "Axila",
+                      },
+                    ]
+                  : [
+                      {
+                        x: Number((backShoulderX - (backShoulderX - backQuarterBust) * 0.25).toFixed(2)),
+                        y: Number((armholeDepth * 0.65).toFixed(2)),
+                        angle: 0,
+                        label: "Sisa tras.",
+                        count: 2 as const,
+                      },
+                    ]),
+              {
+                x: backTorsoWaistX,
+                y: backBodiceLen,
+                angle: 0,
+                label: torsoFit === "loose" ? "Cintura holgada" : "Cintura",
+              },
+            ],
+            labelPos: { x: backBaseWaistX * 0.48, y: backBodiceLen * 0.7 },
+            internalLines: useWaistDart
+              ? [
+                  buildVerticalWaistDart({
+                    centerX: Math.max(6.0, backQuarterBust * 0.44),
+                    topY: armholeDepth + 3.0,
+                    waistY: backBodiceLen,
+                    botY: Math.min(backTotalLen - 3, backBodiceLen + hipExt * 0.68),
+                    halfWidthCm: Number((backWaistDartIntake / 2).toFixed(2)),
+                    label: "Pinza espalda",
+                  }),
+                ]
+              : undefined,
+            foldLine: { x1: 0, y1: backNeckDrop, x2: 0, y2: backTotalLen },
+            edgeAllowances: {
               0: "curve",
               1: "seam",
               2: "curve",
+              4: "hem",
+              5: "fold",
             },
-        cutQuantity: isOpenFront ? 2 : 1,
-        cutOnFold: !isOpenFront,
-        seamAnchors: {
-          shoulder: Number(frontShoulderLen.toFixed(2)),
-          sideSeam: Number((frontUpperSideMeasured + hipCurveLenFront).toFixed(2)),
-          armhole: Number(frontArmholeLen.toFixed(2)),
-          neckline: Number(frontNeckArc.toFixed(2)),
-        },
-      },
-      seamAllowance
-    )
-  );
-
-  if (isWrapFront) {
-    pieces.push(
-      buildWrapFacingPiece({
-        neckW,
-        shoulderX,
-        shoulderSlope,
-        wrapOverlap,
-        wrapWaistY: frontWaistCornerY,
-        seamAllowance,
-      })
-    );
+            cutQuantity: 1,
+            cutOnFold: true,
+            seamAnchors: {
+              ...(raglanData
+                ? { raglanSeam: raglanData.backRaglanSeamCm }
+                : {
+                    shoulder: Number(backShoulderLen.toFixed(2)),
+                    armhole: Number(backArmholeLen.toFixed(2)),
+                  }),
+              sideSeam: Number((backSideSeamUpperLen + hipCurveLenBack).toFixed(2)),
+              neckline: Number(backNeckArc.toFixed(2)),
+            },
+          },
+          seamAllowance
+        )
+      );
+    }
   }
 
-  // 2. TRASERO
-  const backShoulderX = shoulderX + backShoulderEase;
-  const backUpperSide: PathCommand[] = kimonoBackWing
-    ? [...kimonoBackWing.commands, { type: "L", x: backTorsoWaistX, y: backBodiceLen }]
-    : [
-        { type: "L", x: backShoulderX, y: shoulderSlope },
-        backArmholeCmd,
-        { type: "L", x: backTorsoWaistX, y: backBodiceLen },
-      ];
-
-  const backSeam: PathCommand[] = [
-    { type: "M", x: 0, y: backNeckDrop },
-    ...backNeckCmds,
-    ...backUpperSide,
-    {
-      type: "C",
-      cp1x: backTorsoWaistX + (backQuarterHip - backTorsoWaistX) * 0.45,
-      cp1y: backBodiceLen + hipExt * 0.35,
-      cp2x: backQuarterHip,
-      cp2y: backBodiceLen + hipExt * 0.75,
-      x: backQuarterHip,
-      y: backTotalLen,
-    },
-    { type: "L", x: 0, y: backTotalLen },
-    { type: "Z" },
-  ];
-
-  const backShoulderLen = Math.hypot(backShoulderX - neckW, shoulderSlope);
-
-  pieces.push(
-    normalizePiece(
-      {
-        id: "back",
-        name: "TRASERO (x1 al doblez)",
-        subtitle: kimonoBackWing
-          ? `Manga Kimono (${kimonoBackWing.shoulderSleeveLenCm} cm) | Axila: ${kimonoBackWing.underarmCurveLenCm} cm`
-          : `Sisa tras: ${backArmholeLen.toFixed(1)} cm`,
-        tabLabel: "Trasero",
-        seamPath: backSeam,
-        grainline: {
-          x1: Math.max(4, backBaseWaistX * 0.45),
-          y1: 10,
-          x2: Math.max(4, backBaseWaistX * 0.45),
-          y2: backTotalLen - 6,
-        },
-        notches: [
-          ...(kimonoBackWing
-            ? [
-                {
-                  x: kimonoBackWing.outerX,
-                  y: kimonoBackWing.outerDropY,
-                  angle: 0,
-                  label: "Puño Kimono",
-                },
-                {
-                  x: kimonoBackWing.joinX,
-                  y: kimonoBackWing.joinY,
-                  angle: 0,
-                  label: "Axila",
-                },
-              ]
-            : [
-                {
-                  x: Number((backShoulderX - (backShoulderX - backQuarterBust) * 0.25).toFixed(2)),
-                  y: Number((armholeDepth * 0.65).toFixed(2)),
-                  angle: 0,
-                  label: "Sisa tras.",
-                  count: 2 as const,
-                },
-              ]),
-          {
-            x: backTorsoWaistX,
-            y: backBodiceLen,
-            angle: 0,
-            label: torsoFit === "loose" ? "Cintura holgada" : "Cintura",
-          },
-        ],
-        labelPos: { x: backBaseWaistX * 0.48, y: backBodiceLen * 0.7 },
-        internalLines: useWaistDart
-          ? [
-              buildVerticalWaistDart({
-                centerX: Math.max(6.0, backQuarterBust * 0.44),
-                topY: armholeDepth + 3.0,
-                waistY: backBodiceLen,
-                botY: Math.min(backTotalLen - 3, backBodiceLen + hipExt * 0.68),
-                halfWidthCm: Number((waistDartIntake / 2).toFixed(2)),
-                label: "Pinza espalda",
-              }),
-            ]
-          : undefined,
-        foldLine: { x1: 0, y1: backNeckDrop, x2: 0, y2: backTotalLen },
-        edgeAllowances: {
-          0: "curve",
-          1: "seam",
-          2: "curve",
-          4: "hem",
-          5: "fold",
-        },
-        cutQuantity: 1,
-        cutOnFold: true,
-        seamAnchors: {
-          shoulder: Number(backShoulderLen.toFixed(2)),
-          sideSeam: Number((backSideSeamUpperLen + hipCurveLenBack).toFixed(2)),
-          armhole: Number(backArmholeLen.toFixed(2)),
-          neckline: Number(backNeckArc.toFixed(2)),
-        },
-      },
-      seamAllowance
-    )
-  );
-
-  // 3. MANGA (Manga sastre de 2 hojas para Blazer woven largo; manga asimétrica con puño en camisa)
+  // 3. MANGA (Raglán enteriza, Sastre de 2 hojas o Manga estándar con puño opcional)
   const useTwoPieceSleeve =
+    !raglanData &&
     subStyle === "jacket" &&
     sleeveStyle === "long" &&
     fabricType === "woven" &&
     !extras?.flaredSleeve;
-  const withShirtCuff =
-    useShirtCollar &&
-    sleeveStyle === "long" &&
-    fabricType === "woven" &&
-    !extras?.flaredSleeve;
 
-  if (useTwoPieceSleeve) {
+  if (raglanData) {
+    pieces.push(raglanData.sleevePiece);
+    if (withShirtCuff) {
+      pieces.push(
+        buildShirtCuffPiece({
+          wristCm: pro.wrist,
+          seamAllowance,
+        })
+      );
+    }
+  } else if (useTwoPieceSleeve) {
     pieces.push(
       ...buildTwoPieceTailoredSleevePieces({
         armholeDepth,
@@ -742,6 +1062,7 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
 
   // 4. CUELLOS / VISTAS ANATÓMICAS
   if (!isWrapFront) {
+    const totalHalfNeck = raglanData ? raglanData.totalNeckArcCm : frontNeckArc + backNeckArc;
     if (useTailoredLapel) {
       pieces.push(
         ...buildTailoredCollarAndFacingPieces({
@@ -759,19 +1080,19 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
       pieces.push(
         ...buildShirtDressDetailPieces({
           neckW,
-          frontLengthCm: frontTotalHemY - frontNeckDrop,
+          frontLengthCm: frontTotalHemY - frontNeckStartY,
           seamAllowance,
-          totalHalfNeckPerimeter: frontNeckArc + backNeckArc,
+          totalHalfNeckPerimeter: totalHalfNeck,
         })
       );
     } else if (subStyle === "tshirt" && fabricType === "stretch") {
       pieces.push(
         buildRibNeckbandPiece({
-          totalNeckPerimeterCm: (frontNeckArc + backNeckArc) * 2,
+          totalNeckPerimeterCm: totalHalfNeck * 2,
           seamAllowance,
         })
       );
-    } else {
+    } else if (!raglanData) {
       pieces.push(
         buildAnatomicalNeckFacing({
           id: "front_neck_facing",
@@ -787,20 +1108,24 @@ export function generateTopPattern(input: TopEngineInput): PatternResult {
           isFront: true,
           seamAllowance,
           openFront: subStyle === "jacket",
-        }),
-        buildAnatomicalNeckFacing({
-          id: "back_neck_facing",
-          name: "VISTA ESCOTE TRASERO (x1 doblez)",
-          tabLabel: "Vista Trasera",
-          neckWidth: neckW,
-          neckDrop: backNeckDrop,
-          style: "round",
-          widthCm: subStyle === "jacket" ? 5.5 : 4.5,
-          isFront: false,
-          seamAllowance,
-          openFront: false,
         })
       );
+      if (!backYokeData) {
+        pieces.push(
+          buildAnatomicalNeckFacing({
+            id: "back_neck_facing",
+            name: "VISTA ESCOTE TRASERO (x1 doblez)",
+            tabLabel: "Vista Trasera",
+            neckWidth: neckW,
+            neckDrop: backNeckDrop,
+            style: "round",
+            widthCm: subStyle === "jacket" ? 5.5 : 4.5,
+            isFront: false,
+            seamAllowance,
+            openFront: false,
+          })
+        );
+      }
     }
   }
 
